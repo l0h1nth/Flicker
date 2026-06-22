@@ -1,0 +1,25 @@
+{
+  "name": "flicker-deadline-rescue",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:server": "node --watch server/index.js",
+    "dev:client": "vite client --host 0.0.0.0",
+    "build": "vite build client --outDir ../dist --emptyOutDir",
+    "start": "node server/index.js"
+  },
+  "dependencies": {
+    "@google/genai": "^1.7.0",
+    "@vitejs/plugin-react": "^4.5.2",
+    "concurrently": "^9.2.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.5.0",
+    "express": "^4.21.2",
+    "vite": "^6.3.5",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {}
+}

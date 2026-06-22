@@ -23,6 +23,8 @@ Traditional reminder apps are passive. They tell users that something is due, bu
 - **Friend Request Flow:** Friends can accept or reject connection requests.
 - **Flare Response Flow:** Friends can volunteer or reject task help requests.
 - **Allowed Subtask Takeover:** For appropriate shared tasks, friends can accept a takeover request and earn extra rescue points.
+- **Shared Live Tasks:** Once a friend volunteers, the task appears on their Live page. Progress and completion update both users.
+- **Auto Refresh:** Dashboards refresh automatically so two logged-in users can test the collaboration flow without manual reloads.
 - **Rescue Points:** Friends earn points for supporting focus sprints, reminders, and deadline saves.
 - **Privacy Controls:** Users control whether missed-task activity is shared and whether task names are visible.
 - **Completion Insight:** Gemini reflects on completed work and helps improve future estimates.
@@ -55,7 +57,8 @@ Flicker is not just another to-do list. It combines practical AI planning with s
 5. Use Break It Down for a large task.
 6. Trigger Last Light mode for an urgent task.
 7. Log into a second account and accept or reject the Flare.
-8. Complete the task and show that it moves from Live to Finished.
+8. Show the accepted task on the friend's Live page.
+9. Complete the task as the friend and show that it moves from Live to Finished for both users.
 
 ## Submission Checklist
 

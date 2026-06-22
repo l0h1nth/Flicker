@@ -17,6 +17,8 @@ It turns passive reminders into action nudges, detects deadline heat, and lets u
 - Friend request accept/reject flow
 - Send a Flare for focus sprint, review, reminder support, or allowed subtask takeover
 - Friend volunteer/reject flow for task help requests
+- Accepted Flares become shared Live tasks for the friend
+- Friend progress and completion update both users through auto-refresh
 - Live page for current work and Finished page for completed work
 - First-login tutorial
 - Rescue points and crew activity feed
@@ -60,7 +62,20 @@ Backend: `http://localhost:8080`
 4. As `bob`, accept the friend request.
 5. As `alice`, add a live task and send a Flare to `bob`.
 6. As `bob`, go to Requests and choose Volunteer or Reject.
-7. As `alice`, mark the task Done and confirm it moves to Finished.
+7. If Bob volunteers, the shared task appears on Bob's Live page.
+8. As `bob`, update progress or mark it done.
+9. Confirm Alice's dashboard auto-refreshes and the task moves to Finished for both users.
+
+## AI Notes
+
+Flicker uses Gemini when `GEMINI_API_KEY` is available in `.env`. The UI shows `Gemini on` when the key is configured. If the key is missing or Gemini fails, Flicker falls back to local task-aware responses so the app still works during demos.
+
+The main AI actions are:
+
+- **Daily Signal:** a simple plan for the current board.
+- **Smart Nudge:** one next action for a task.
+- **Break Down:** small steps for an overwhelming task.
+- **Last Light:** emergency steps when time is tight.
 
 Build and serve production:
 
@@ -80,6 +95,14 @@ git commit -m "Build Flicker deadline rescue app"
 git branch -M main
 git remote add origin https://github.com/YOUR_USERNAME/flicker.git
 git push -u origin main
+```
+
+For this update after the first build:
+
+```bash
+git add .
+git commit -m "Add shared flare tasks and clearer guidance"
+git push
 ```
 
 ## Google AI Studio Submission Notes

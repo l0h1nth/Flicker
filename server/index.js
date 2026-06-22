@@ -13,6 +13,10 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const port = process.env.PORT || 8080;
 const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const fallbackModels = (process.env.GEMINI_FALLBACK_MODELS || 'gemini-2.0-flash')
+  .split(',')
+  .map((item) => item.trim())
+  .filter(Boolean);
 const dataDir = path.join(__dirname, 'data');
 const dbPath = process.env.SQLITE_PATH || path.join(dataDir, 'flicker.sqlite');
 
@@ -95,9 +99,25 @@ db.exec(`
   );
 `);
 
-const ai = process.env.GEMINI_API_KEY
-  ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY })
-  : null;
+for (const migration of [
+  'ALTER TABLE tasks ADD COLUMN completed_by TEXT'
+]) {
+  try {
+    db.exec(migration);
+  } catch (error) {
+    if (!String(error.message).includes('duplicate column')) {
+      throw error;
+    }
+  }
+}
+
+const geminiApiKeySource = process.env.GEMINI_API_KEY
+  ? 'GEMINI_API_KEY'
+  : process.env.GOOGLE_API_KEY
+    ? 'GOOGLE_API_KEY'
+    : null;
+const geminiApiKey = (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '').trim();
+const ai = geminiApiKey ? new GoogleGenAI({ apiKey: geminiApiKey }) : null;
 
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
@@ -117,6 +137,10 @@ function id() {
 
 function now() {
   return new Date().toISOString();
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function hashPassword(password, salt = randomBytes(16).toString('hex')) {
@@ -186,32 +210,52 @@ function safeParseJson(text, fallback) {
 async function generateJson(prompt, fallback) {
   if (!ai) return fallback;
 
-  try {
-    const response = await ai.models.generateContent({
-      model,
-      contents: `${jsonRules}\n\n${prompt}`,
-      config: {
-        responseMimeType: 'application/json',
-        temperature: 0.65
-      }
-    });
+  const modelsToTry = [...new Set([model, ...fallbackModels])];
+  let lastError = null;
 
-    return safeParseJson(response.text || '', fallback);
-  } catch (error) {
-    console.error('Gemini request failed:', error.message);
-    return {
-      ...fallback,
-      offline: true,
-      note: 'Gemini was unavailable, so Flicker used a local fallback.'
-    };
+  for (const modelName of modelsToTry) {
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      try {
+        const response = await ai.models.generateContent({
+          model: modelName,
+          contents: `${jsonRules}\n\n${prompt}`,
+          config: {
+            responseMimeType: 'application/json',
+            temperature: 0.65
+          }
+        });
+
+        const text = typeof response.text === 'function' ? response.text() : response.text;
+        return {
+          ...safeParseJson(text || '', fallback),
+          modelUsed: modelName
+        };
+      } catch (error) {
+        lastError = error;
+        const message = String(error.message || '');
+        const retryable = message.includes('"code":503') || message.includes('UNAVAILABLE') || message.includes('RESOURCE_EXHAUSTED');
+        if (!retryable) break;
+        await sleep(450 * attempt);
+      }
+    }
   }
+
+  console.error('Gemini request failed:', lastError?.message || lastError);
+  return {
+    ...fallback,
+    offline: true,
+    note: 'Gemini was unavailable, so Flicker used a local fallback.'
+  };
 }
 
 function tasksFor(userId, status) {
   return db.prepare(`
     SELECT
       tasks.*,
-      users.username AS owner_username
+      users.username AS owner_username,
+      'owner' AS role,
+      NULL AS help_request_id,
+      NULL AS support_kind
     FROM tasks
     JOIN users ON users.id = tasks.owner_id
     WHERE tasks.owner_id = ? AND tasks.status = ?
@@ -219,14 +263,134 @@ function tasksFor(userId, status) {
   `).all(userId, status);
 }
 
+function sharedTasksFor(userId, status) {
+  return db.prepare(`
+    SELECT
+      tasks.*,
+      users.username AS owner_username,
+      'helper' AS role,
+      help_requests.id AS help_request_id,
+      help_requests.kind AS support_kind
+    FROM help_requests
+    JOIN tasks ON tasks.id = help_requests.task_id
+    JOIN users ON users.id = tasks.owner_id
+    WHERE help_requests.friend_id = ?
+      AND help_requests.status = 'accepted'
+      AND tasks.status = ?
+    ORDER BY datetime(tasks.deadline) ASC
+  `).all(userId, status);
+}
+
+function taskForUser(taskId, userId) {
+  const owned = db.prepare(`
+    SELECT tasks.*, users.username AS owner_username, 'owner' AS role, NULL AS helper_id
+    FROM tasks
+    JOIN users ON users.id = tasks.owner_id
+    WHERE tasks.id = ? AND tasks.owner_id = ?
+  `).get(taskId, userId);
+  if (owned) return owned;
+
+  return db.prepare(`
+    SELECT tasks.*, users.username AS owner_username, 'helper' AS role, help_requests.friend_id AS helper_id
+    FROM help_requests
+    JOIN tasks ON tasks.id = help_requests.task_id
+    JOIN users ON users.id = tasks.owner_id
+    WHERE tasks.id = ?
+      AND help_requests.friend_id = ?
+      AND help_requests.status = 'accepted'
+  `).get(taskId, userId);
+}
+
+function minutesUntil(deadline) {
+  return Math.round((new Date(deadline).getTime() - Date.now()) / 60000);
+}
+
+function formatWindow(minutes) {
+  if (minutes < 0) return `${Math.abs(minutes)} minutes late`;
+  if (minutes < 60) return `${minutes} minutes left`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return `${hours} hour${hours === 1 ? '' : 's'}${rest ? ` ${rest} minutes` : ''} left`;
+}
+
+function briefFallback(tasks, user) {
+  const ordered = [...tasks].sort((a, b) => new Date(a.deadline) - new Date(b.deadline));
+  const first = ordered[0];
+  if (!first) {
+    return {
+      headline: 'Your board is clear.',
+      lines: [
+        'Add one task that matters today.',
+        'Use Smart Nudge when you need a first step.',
+        'Send a Flare only when another person can genuinely help.'
+      ],
+      firstMove: 'Add your next real deadline.'
+    };
+  }
+
+  const window = formatWindow(minutesUntil(first.deadline));
+  const sharedCount = ordered.filter((task) => task.role === 'helper').length;
+  return {
+    headline: `${ordered.length} live task${ordered.length === 1 ? '' : 's'}. Start with "${first.title}".`,
+    lines: [
+      `"${first.title}" has ${window}.`,
+      user.energy === 'low' ? 'Keep the first move small: 10 focused minutes.' : 'Use one focused block before checking anything else.',
+      sharedCount ? `${sharedCount} shared task${sharedCount === 1 ? ' is' : 's are'} on your board.` : 'Send a Flare if a task needs review, accountability, or a shared subtask.'
+    ],
+    firstMove: `Open "${first.title}" and make visible progress for 10 minutes.`
+  };
+}
+
+function nudgeFallback(task, user) {
+  const window = formatWindow(minutesUntil(task.deadline));
+  const lowEnergy = user.energy === 'low';
+  return {
+    type: lowEnergy ? 'Tiny Start' : 'Reality Check',
+    message: lowEnergy
+      ? `Do the smallest useful step for "${task.title}" for 10 minutes. Stop after that if needed.`
+      : `"${task.title}" has ${window}. Start now with the part that makes the task easier to finish later.`,
+    safeSnoozeMinutes: minutesUntil(task.deadline) <= 120 ? 10 : 25,
+    friendHelp: task.can_ask_friend
+      ? 'If you are stuck, send a Flare for review, reminder, or a focus sprint.'
+      : 'Friend support is off for this task.'
+  };
+}
+
+function breakdownFallback(task) {
+  const effort = Number(task.effort_minutes || 30);
+  const first = Math.max(5, Math.round(effort * 0.2));
+  const second = Math.max(10, Math.round(effort * 0.55));
+  const third = Math.max(5, effort - first - second);
+  return {
+    summary: `"${task.title}" is easier if you split it into start, finish, and send.`,
+    steps: [
+      { title: 'Set up the file, tab, or materials', minutes: first },
+      { title: 'Finish the minimum useful version', minutes: second },
+      { title: 'Check once and submit or mark done', minutes: third }
+    ]
+  };
+}
+
+function lastLightFallback(task) {
+  return {
+    headline: `"${task.title}" is in Last Light. Ignore perfection.`,
+    moves: [
+      'Open the task and remove anything optional.',
+      'Complete the smallest version that counts.',
+      'Submit, send, or mark it done before polishing.'
+    ],
+    askFriend: task.can_ask_friend
+      ? 'Send a Flare only if the friend can help immediately.'
+      : 'Friend support is off, so keep this solo and simple.'
+  };
+}
+
 function dashboard(userId) {
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
-  const liveTasks = tasksFor(userId, 'active');
-  const completedTasks = db.prepare(`
-    SELECT * FROM tasks
-    WHERE owner_id = ? AND status = 'done'
-    ORDER BY datetime(completed_at) DESC
-  `).all(userId);
+  const liveTasks = [...tasksFor(userId, 'active'), ...sharedTasksFor(userId, 'active')]
+    .sort((a, b) => new Date(a.deadline) - new Date(b.deadline));
+  const completedTasks = [...tasksFor(userId, 'done'), ...sharedTasksFor(userId, 'done')]
+    .sort((a, b) => new Date(b.completed_at || 0) - new Date(a.completed_at || 0));
 
   const friends = db.prepare(`
     SELECT users.id, users.username, users.rescue_points AS rescuePoints
@@ -292,6 +456,10 @@ function dashboard(userId) {
 
   return {
     user: userView(user),
+    ai: {
+      configured: Boolean(ai),
+      model
+    },
     liveTasks,
     completedTasks,
     friends,
@@ -304,7 +472,7 @@ function dashboard(userId) {
 }
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, ai: Boolean(ai), model, database: dbPath });
+  res.json({ ok: true, ai: Boolean(ai), keySource: geminiApiKeySource, model, fallbackModels, database: dbPath });
 });
 
 app.post('/api/auth/register', (req, res) => {
@@ -395,33 +563,41 @@ app.post('/api/tasks', auth, (req, res) => {
 });
 
 app.patch('/api/tasks/:taskId', auth, (req, res) => {
-  const task = db.prepare('SELECT * FROM tasks WHERE id = ? AND owner_id = ?').get(req.params.taskId, req.user.id);
+  const task = taskForUser(req.params.taskId, req.user.id);
   if (!task) return res.status(404).json({ error: 'Task not found.' });
 
   db.prepare(`
     UPDATE tasks
     SET progress = ?, notes = ?, updated_at = ?
-    WHERE id = ? AND owner_id = ?
+    WHERE id = ?
   `).run(
     Number(req.body.progress ?? task.progress),
     String(req.body.notes ?? task.notes),
     now(),
-    req.params.taskId,
-    req.user.id
+    req.params.taskId
   );
+  if (task.role === 'helper') {
+    addActivity(task.owner_id, `@${req.user.username} updated progress on "${task.title}".`);
+  }
   res.json(dashboard(req.user.id));
 });
 
 app.post('/api/tasks/:taskId/complete', auth, (req, res) => {
-  const task = db.prepare('SELECT * FROM tasks WHERE id = ? AND owner_id = ?').get(req.params.taskId, req.user.id);
+  const task = taskForUser(req.params.taskId, req.user.id);
   if (!task) return res.status(404).json({ error: 'Task not found.' });
 
   db.prepare(`
     UPDATE tasks
-    SET status = 'done', progress = 100, completed_at = ?, updated_at = ?
-    WHERE id = ? AND owner_id = ?
-  `).run(now(), now(), req.params.taskId, req.user.id);
-  addActivity(req.user.id, `Completed "${task.title}". Moved to Finished.`);
+    SET status = 'done', progress = 100, completed_at = ?, completed_by = ?, updated_at = ?
+    WHERE id = ?
+  `).run(now(), req.user.id, now(), req.params.taskId);
+
+  if (task.role === 'helper') {
+    addActivity(req.user.id, `You completed @${task.owner_username || 'your friend'}'s task "${task.title}".`);
+    addActivity(task.owner_id, `@${req.user.username} completed "${task.title}". Moved to Finished.`);
+  } else {
+    addActivity(req.user.id, `Completed "${task.title}". Moved to Finished.`);
+  }
   res.json(dashboard(req.user.id));
 });
 
@@ -506,16 +682,8 @@ app.post('/api/flares/:requestId/respond', auth, (req, res) => {
 });
 
 app.post('/api/ai/brief', auth, async (req, res) => {
-  const tasks = tasksFor(req.user.id, 'active');
-  const fallback = {
-    headline: 'Start with the soonest useful task.',
-    lines: [
-      'Finish one small task first to clear mental space.',
-      'Send a flare if a task needs another person.',
-      'Move finished work to the Finished page so Live stays clean.'
-    ],
-    firstMove: tasks[0] ? `Open "${tasks[0].title}" and do 10 focused minutes.` : 'Add one task you need to protect today.'
-  };
+  const tasks = [...tasksFor(req.user.id, 'active'), ...sharedTasksFor(req.user.id, 'active')];
+  const fallback = briefFallback(tasks, req.user);
 
   const result = await generateJson(
     `Create a short daily brief for @${req.user.username}.
@@ -535,15 +703,10 @@ Schema:
 });
 
 app.post('/api/ai/nudge', auth, async (req, res) => {
-  const task = db.prepare('SELECT * FROM tasks WHERE id = ? AND owner_id = ?').get(req.body.taskId, req.user.id);
+  const task = taskForUser(req.body.taskId, req.user.id);
   if (!task) return res.status(404).json({ error: 'Task not found.' });
 
-  const fallback = {
-    type: 'Tiny Start',
-    message: `Open "${task.title}" and work for 10 minutes. Do not optimize yet.`,
-    safeSnoozeMinutes: 20,
-    friendHelp: task.can_ask_friend ? 'Ask a friend for review or a focus sprint if you are stuck.' : 'Friend support is off for this task.'
-  };
+  const fallback = nudgeFallback(task, req.user);
 
   const result = await generateJson(
     `Create one simple smart reminder for this task.
@@ -564,17 +727,10 @@ Schema:
 });
 
 app.post('/api/ai/breakdown', auth, async (req, res) => {
-  const task = db.prepare('SELECT * FROM tasks WHERE id = ? AND owner_id = ?').get(req.body.taskId, req.user.id);
+  const task = taskForUser(req.body.taskId, req.user.id);
   if (!task) return res.status(404).json({ error: 'Task not found.' });
 
-  const fallback = {
-    summary: 'Split this into three small moves.',
-    steps: [
-      { title: 'Start the file or workspace', minutes: 5 },
-      { title: 'Finish the minimum useful version', minutes: 25 },
-      { title: 'Review and send', minutes: 10 }
-    ]
-  };
+  const fallback = breakdownFallback(task);
 
   const result = await generateJson(
     `Break this task into small practical steps.
@@ -592,18 +748,10 @@ Schema:
 });
 
 app.post('/api/ai/last-light', auth, async (req, res) => {
-  const task = db.prepare('SELECT * FROM tasks WHERE id = ? AND owner_id = ?').get(req.body.taskId, req.user.id);
+  const task = taskForUser(req.body.taskId, req.user.id);
   if (!task) return res.status(404).json({ error: 'Task not found.' });
 
-  const fallback = {
-    headline: 'Planning time is over. Finish the minimum version.',
-    moves: [
-      'Open the task and remove non-essential work.',
-      'Complete the smallest version that can count as done.',
-      'Submit or send it before polishing.'
-    ],
-    askFriend: task.can_ask_friend ? 'Send a flare for review or a reminder check-in.' : 'Friend support is off, so keep this solo and simple.'
-  };
+  const fallback = lastLightFallback(task);
 
   const result = await generateJson(
     `Create Last Light triage for this task.

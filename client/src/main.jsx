@@ -4,6 +4,12 @@ import './styles.css';
 
 const apiBase = import.meta.env.VITE_API_BASE || '';
 const tokenKey = 'flicker-token-v2';
+const flareHelp = {
+  'Focus sprint': 'Your friend agrees to work alongside you for a short focused session.',
+  'Review / unblock': 'Your friend helps check, explain, or unblock the task. They are not doing dishonest work for you.',
+  'Reminder check-in': 'Your friend manually checks on you later so the task does not disappear.',
+  'Take over allowed subtask': 'Use this only for shared or appropriate tasks, like booking, pickup, formatting, or admin work.'
+};
 
 function soon(hours) {
   const date = new Date(Date.now() + hours * 60 * 60 * 1000);
@@ -62,7 +68,12 @@ function App() {
   const lastLight = liveTasks.find((task) => task.heat.label === 'Last Light');
 
   useEffect(() => {
-    if (token) refresh();
+    if (!token) return undefined;
+    refresh(true);
+    const timer = setInterval(() => {
+      refresh(true);
+    }, 3500);
+    return () => clearInterval(timer);
   }, [token]);
 
   async function api(path, options = {}) {
@@ -79,23 +90,23 @@ function App() {
     return data;
   }
 
-  async function run(label, action) {
-    setLoading(label);
+  async function run(label, action, silent = false) {
+    if (!silent) setLoading(label);
     setError('');
     try {
       return await action();
     } catch (err) {
       setError(err.message);
     } finally {
-      setLoading('');
+      if (!silent) setLoading('');
     }
   }
 
-  async function refresh() {
+  async function refresh(silent = false) {
     await run('Loading Flicker', async () => {
       const data = await api('/api/dashboard');
       setDashboard(data);
-    });
+    }, silent);
   }
 
   async function login(mode, username, password) {
@@ -163,7 +174,7 @@ function App() {
     await run('Creating daily signal', async () => {
       const data = await api('/api/ai/brief', { method: 'POST' });
       setBrief(data);
-      setPanel({ title: data.headline, lines: data.lines, body: data.firstMove });
+      setPanel({ title: data.headline, lines: data.lines, body: data.firstMove, note: data.note, offline: data.offline, modelUsed: data.modelUsed });
     });
   }
 
@@ -172,11 +183,11 @@ function App() {
     await run('Asking Gemini', async () => {
       const data = await api(route, { method: 'POST', body: { taskId: task.id } });
       if (type === 'breakdown') {
-        setPanel({ title: 'Break it down', body: data.summary, steps: data.steps });
+        setPanel({ title: 'Break it down', body: data.summary, steps: data.steps, note: data.note, offline: data.offline, modelUsed: data.modelUsed });
       } else if (type === 'last') {
-        setPanel({ title: data.headline, lines: data.moves, body: data.askFriend });
+        setPanel({ title: data.headline, lines: data.moves, body: data.askFriend, note: data.note, offline: data.offline, modelUsed: data.modelUsed });
       } else {
-        setPanel({ title: data.type, body: data.message, lines: [`Safe snooze: ${data.safeSnoozeMinutes} min`, data.friendHelp] });
+        setPanel({ title: data.type, body: data.message, lines: [`Safe snooze: ${data.safeSnoozeMinutes} min`, data.friendHelp], note: data.note, offline: data.offline, modelUsed: data.modelUsed });
       }
     });
   }
@@ -207,6 +218,10 @@ function App() {
     await run('Updating flare', async () => {
       const data = await api(`/api/flares/${requestId}/respond`, { method: 'POST', body: { action } });
       setDashboard(data);
+      if (action === 'accept') {
+        setTab('live');
+        setPanel({ title: 'Shared task added', body: 'This task is now on your Live page. You can update progress or mark it done.' });
+      }
     });
   }
 
@@ -234,6 +249,9 @@ function App() {
             </select>
           </label>
           <button onClick={aiBrief}>Daily Signal</button>
+          <span className={dashboard.ai?.configured ? 'ai-status live' : 'ai-status'}>
+            {dashboard.ai?.configured ? 'Gemini on' : 'Fallback AI'}
+          </span>
           <button className="secondary" onClick={logout}>Logout</button>
         </div>
       </header>
@@ -295,6 +313,7 @@ function App() {
         </section>
 
         <aside className="side">
+          <GuideCard />
           <AiPanel panel={panel} />
           <Activity activity={dashboard.activity} />
         </aside>
@@ -345,6 +364,7 @@ function Tutorial({ onDone }) {
           <li><strong>Finished</strong> keeps completed tasks away from today’s noise.</li>
           <li><strong>Crew</strong> lets you add friends by username.</li>
           <li><strong>Requests</strong> is where friends accept or reject your flares.</li>
+          <li><strong>Smart Nudge</strong> gives one next action. <strong>Break Down</strong> splits a task. <strong>Last Light</strong> gives emergency steps.</li>
         </ol>
         <button onClick={onDone}>Got it</button>
       </section>
@@ -447,10 +467,14 @@ function TaskCard({ task, friends, updateTask, completeTask, aiAction, sendFlare
       <div className="task-head">
         <div>
           <span className="heat">{task.heat.label}</span>
+          {task.role === 'helper' && <span className="shared-pill">Shared by @{task.owner_username}</span>}
           <h3>{task.title}</h3>
-          <p>{task.category} · {timeLeft(task.heat.minutesLeft)} · {task.effortMinutes} min</p>
+          <p>
+            {task.category} · {timeLeft(task.heat.minutesLeft)} · {task.effortMinutes} min
+            {task.support_kind ? ` · ${task.support_kind}` : ''}
+          </p>
         </div>
-        <button onClick={() => completeTask(task)}>Done</button>
+        <button onClick={() => completeTask(task)}>{task.role === 'helper' ? 'Complete for friend' : 'Done'}</button>
       </div>
       <div className="progress"><span style={{ width: `${task.progress || 0}%` }} /></div>
       <label>
@@ -463,7 +487,7 @@ function TaskCard({ task, friends, updateTask, completeTask, aiAction, sendFlare
         <button className="secondary" onClick={() => aiAction('breakdown', task)}>Break Down</button>
         <button className="secondary danger-button" onClick={() => aiAction('last', task)}>Last Light</button>
       </div>
-      {task.canAskFriend && (
+      {task.role !== 'helper' && task.canAskFriend && (
         <div className="flare-box">
           <p className="eyebrow">Send a Flare</p>
           {friends.length === 0 ? (
@@ -482,6 +506,7 @@ function TaskCard({ task, friends, updateTask, completeTask, aiAction, sendFlare
                   <option>Take over allowed subtask</option>
                 </select>
               </div>
+              <p className="preview"><strong>Preview:</strong> {flareHelp[kind]}</p>
               <input value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Short message for your friend" />
               <button
                 className="secondary"
@@ -493,6 +518,9 @@ function TaskCard({ task, friends, updateTask, completeTask, aiAction, sendFlare
             </>
           )}
         </div>
+      )}
+      {task.role === 'helper' && (
+        <p className="preview">You accepted this Flare. Updating progress or completing it will update both dashboards.</p>
       )}
     </article>
   );
@@ -610,11 +638,28 @@ function AiPanel({ panel }) {
       ) : (
         <>
           <h3>{panel.title}</h3>
+          {panel.offline && <span className="status rejected">Fallback used</span>}
+          {panel.modelUsed && <span className="status accepted">Gemini: {panel.modelUsed}</span>}
           {panel.body && <p>{panel.body}</p>}
           {panel.lines?.map((line) => <p className="muted" key={line}>{line}</p>)}
           {panel.steps?.map((step) => <p className="muted" key={step.title}>{step.title} · {step.minutes} min</p>)}
+          {panel.note && <p className="preview">{panel.note}</p>}
         </>
       )}
+    </section>
+  );
+}
+
+function GuideCard() {
+  return (
+    <section className="card guide">
+      <p className="eyebrow">Quick guide</p>
+      <h3>What the buttons mean</h3>
+      <p><strong>Daily Signal:</strong> a simple plan for your current board.</p>
+      <p><strong>Smart Nudge:</strong> one small action to start or recover a task.</p>
+      <p><strong>Break Down:</strong> splits a task into short steps.</p>
+      <p><strong>Last Light:</strong> emergency mode when time is tight.</p>
+      <p><strong>Send a Flare:</strong> ask a friend to volunteer for focus, review, reminders, or an allowed shared subtask.</p>
     </section>
   );
 }

@@ -128,6 +128,21 @@ label {
   gap: 0.65rem;
 }
 
+.ai-status {
+  align-self: end;
+  border-radius: 999px;
+  background: #f8e8e5;
+  color: var(--red);
+  padding: 0.52rem 0.72rem;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.ai-status.live {
+  background: #e8f7ef;
+  color: var(--green);
+}
+
 .eyebrow {
   margin: 0 0 0.5rem;
   color: var(--accent-dark);
@@ -246,7 +261,8 @@ label {
 }
 
 .heat,
-.status {
+.status,
+.shared-pill {
   display: inline-flex;
   border-radius: 999px;
   background: #fff0e8;
@@ -254,6 +270,12 @@ label {
   padding: 0.25rem 0.62rem;
   font-size: 0.78rem;
   font-weight: 800;
+}
+
+.shared-pill {
+  margin-left: 0.35rem;
+  background: #e8f0ff;
+  color: #2f5bb8;
 }
 
 .heat.done,
@@ -297,6 +319,19 @@ label {
   background: #fffaf6;
   margin-top: 0.9rem;
   padding: 0.85rem;
+}
+
+.preview {
+  border-radius: 8px;
+  background: #fff3ea;
+  color: var(--accent-dark);
+  margin: 0;
+  padding: 0.65rem 0.75rem;
+}
+
+.guide p {
+  color: var(--muted);
+  margin: 0.55rem 0;
 }
 
 .banner {

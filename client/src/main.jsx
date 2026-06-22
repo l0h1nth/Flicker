@@ -2,636 +2,639 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
 
-const storageKey = 'flicker-state-v1';
 const apiBase = import.meta.env.VITE_API_BASE || '';
-
-const starterState = {
-  profile: {
-    username: 'you',
-    energy: 'okay',
-    publicMisses: false,
-    showTaskNames: false
-  },
-  tasks: [
-    {
-      id: crypto.randomUUID(),
-      title: 'Submit hackathon project doc',
-      deadline: soon(26),
-      effortMinutes: 90,
-      importance: 5,
-      category: 'Hackathon',
-      notes: 'Need problem statement, solution overview, tech stack, Google tech used.',
-      progress: 20,
-      status: 'active',
-      canAskFriend: true
-    },
-    {
-      id: crypto.randomUUID(),
-      title: 'Pay internet bill',
-      deadline: soon(5),
-      effortMinutes: 10,
-      importance: 4,
-      category: 'Life',
-      notes: 'Quick payment, high consequence if forgotten.',
-      progress: 0,
-      status: 'active',
-      canAskFriend: false
-    }
-  ],
-  friends: [
-    { id: crypto.randomUUID(), username: 'maya', points: 40 },
-    { id: crypto.randomUUID(), username: 'arjun', points: 25 }
-  ],
-  flares: [],
-  activity: [
-    'Flicker created your first rescue board.',
-    'Maya is available for focus sprint support.'
-  ]
-};
+const tokenKey = 'flicker-token-v2';
 
 function soon(hours) {
   const date = new Date(Date.now() + hours * 60 * 60 * 1000);
   date.setSeconds(0, 0);
-  return toDatetimeLocal(date);
-}
-
-function toDatetimeLocal(date) {
   const offset = date.getTimezoneOffset();
   return new Date(date.getTime() - offset * 60 * 1000).toISOString().slice(0, 16);
 }
 
-function loadState() {
-  try {
-    return JSON.parse(localStorage.getItem(storageKey)) || starterState;
-  } catch {
-    return starterState;
-  }
-}
-
 function heatFor(task) {
-  if (task.status === 'done') return { label: 'Saved', level: 0, className: 'saved' };
-  const deadline = new Date(task.deadline).getTime();
-  const rawMinutesLeft = Math.round((deadline - Date.now()) / 60000);
-  if (rawMinutesLeft < 0) return { label: 'Missed', level: 6, className: 'missed', minutesLeft: rawMinutesLeft };
-  const minutesLeft = Math.max(0, rawMinutesLeft);
-  const remaining = Number(task.effortMinutes || 0) * (1 - Number(task.progress || 0) / 100);
-  const importance = Number(task.importance || 3);
-  const ratio = remaining ? minutesLeft / remaining : 99;
+  if (task.status === 'done') return { label: 'Done', className: 'done', level: 0, minutesLeft: 0 };
 
-  if (minutesLeft <= 120) return { label: 'Last Light', level: 5, className: 'last', minutesLeft };
-  if (ratio <= 1.2 || minutesLeft <= 360) return { label: 'Critical', level: 4, className: 'critical', minutesLeft };
-  if (ratio <= 2 || importance >= 5) return { label: 'Hot', level: 3, className: 'hot', minutesLeft };
-  if (ratio <= 4) return { label: 'Warming', level: 2, className: 'warm', minutesLeft };
-  return { label: 'Calm', level: 1, className: 'calm', minutesLeft };
+  const rawMinutesLeft = Math.round((new Date(task.deadline).getTime() - Date.now()) / 60000);
+  if (rawMinutesLeft < 0) return { label: 'Missed', className: 'missed', level: 6, minutesLeft: rawMinutesLeft };
+
+  const remaining = Number(task.effort_minutes || task.effortMinutes || 30) * (1 - Number(task.progress || 0) / 100);
+  const ratio = remaining ? rawMinutesLeft / remaining : 99;
+
+  if (rawMinutesLeft <= 120) return { label: 'Last Light', className: 'last', level: 5, minutesLeft: rawMinutesLeft };
+  if (ratio <= 1.2 || rawMinutesLeft <= 360) return { label: 'Critical', className: 'critical', level: 4, minutesLeft: rawMinutesLeft };
+  if (ratio <= 2 || Number(task.importance || 3) >= 5) return { label: 'Hot', className: 'hot', level: 3, minutesLeft: rawMinutesLeft };
+  if (ratio <= 4) return { label: 'Warming', className: 'warm', level: 2, minutesLeft: rawMinutesLeft };
+  return { label: 'Calm', className: 'calm', level: 1, minutesLeft: rawMinutesLeft };
 }
 
-function formatTimeLeft(minutes = 0) {
+function timeLeft(minutes) {
   if (minutes < 0) return `${Math.abs(minutes)}m late`;
-  if (minutes <= 0) return 'deadline passed';
   if (minutes < 60) return `${minutes}m left`;
   const hours = Math.floor(minutes / 60);
   const mins = minutes % 60;
   return `${hours}h ${mins ? `${mins}m` : ''} left`;
 }
 
-async function postJson(path, body) {
-  const response = await fetch(`${apiBase}${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  });
-  if (!response.ok) throw new Error('AI request failed');
-  return response.json();
+function normalizeTask(task) {
+  return {
+    ...task,
+    effortMinutes: task.effort_minutes ?? task.effortMinutes,
+    canAskFriend: Boolean(task.can_ask_friend ?? task.canAskFriend),
+    heat: heatFor(task)
+  };
 }
 
 function App() {
-  const [state, setState] = useState(loadState);
-  const [draft, setDraft] = useState({
-    title: '',
-    deadline: soon(24),
-    effortMinutes: 45,
-    importance: 3,
-    category: 'Study',
-    notes: '',
-    canAskFriend: true
-  });
+  const [token, setToken] = useState(localStorage.getItem(tokenKey) || '');
+  const [dashboard, setDashboard] = useState(null);
+  const [tab, setTab] = useState('live');
+  const [panel, setPanel] = useState(null);
   const [brief, setBrief] = useState(null);
-  const [panel, setPanel] = useState({ type: 'brief' });
   const [loading, setLoading] = useState('');
+  const [error, setError] = useState('');
 
-  const tasksWithHeat = useMemo(
-    () =>
-      state.tasks
-        .map((task) => ({ ...task, heat: heatFor(task) }))
-        .sort((a, b) => b.heat.level - a.heat.level || new Date(a.deadline) - new Date(b.deadline)),
-    [state.tasks]
+  const liveTasks = useMemo(
+    () => (dashboard?.liveTasks || []).map(normalizeTask).sort((a, b) => b.heat.level - a.heat.level),
+    [dashboard]
   );
-
-  const activeTasks = tasksWithHeat.filter((task) => task.status !== 'done');
-  const lastLightTask = activeTasks.find((task) => task.heat.label === 'Last Light');
-  const missedTasks = activeTasks.filter((task) => task.heat.label === 'Missed');
+  const completedTasks = useMemo(() => (dashboard?.completedTasks || []).map(normalizeTask), [dashboard]);
+  const lastLight = liveTasks.find((task) => task.heat.label === 'Last Light');
 
   useEffect(() => {
-    localStorage.setItem(storageKey, JSON.stringify(state));
-  }, [state]);
+    if (token) refresh();
+  }, [token]);
 
-  useEffect(() => {
-    generateBrief();
-  }, []);
-
-  function patchState(updater) {
-    setState((current) => {
-      const next = typeof updater === 'function' ? updater(current) : updater;
-      return next;
+  async function api(path, options = {}) {
+    const response = await fetch(`${apiBase}${path}`, {
+      method: options.method || 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
+      },
+      body: options.body ? JSON.stringify(options.body) : undefined
     });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || 'Something went wrong.');
+    return data;
   }
 
-  async function runAi(label, action) {
+  async function run(label, action) {
     setLoading(label);
+    setError('');
     try {
-      await action();
+      return await action();
+    } catch (err) {
+      setError(err.message);
     } finally {
       setLoading('');
     }
   }
 
-  async function generateBrief() {
-    await runAi('Generating daily brief', async () => {
-      const data = await postJson('/api/ai/brief', {
-        tasks: tasksWithHeat,
-        profile: state.profile
-      });
-      setBrief(data);
-      setPanel({ type: 'brief', data });
+  async function refresh() {
+    await run('Loading Flicker', async () => {
+      const data = await api('/api/dashboard');
+      setDashboard(data);
     });
   }
 
-  function addTask(event) {
-    event.preventDefault();
-    if (!draft.title.trim()) return;
-    const task = {
-      ...draft,
-      id: crypto.randomUUID(),
-      progress: 0,
-      status: 'active',
-      importance: Number(draft.importance),
-      effortMinutes: Number(draft.effortMinutes)
-    };
-    patchState((current) => ({
-      ...current,
-      tasks: [task, ...current.tasks],
-      activity: [`Added "${task.title}".`, ...current.activity].slice(0, 10)
-    }));
-    setDraft({ ...draft, title: '', notes: '' });
+  async function login(mode, username, password) {
+    await run(mode === 'register' ? 'Creating account' : 'Logging in', async () => {
+      const data = await fetch(`${apiBase}/api/auth/${mode}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      }).then(async (res) => {
+        const payload = await res.json();
+        if (!res.ok) throw new Error(payload.error || 'Login failed.');
+        return payload;
+      });
+      localStorage.setItem(tokenKey, data.token);
+      setToken(data.token);
+      setDashboard(data.dashboard);
+    });
   }
 
-  function updateTask(id, updates) {
-    patchState((current) => ({
-      ...current,
-      tasks: current.tasks.map((task) => (task.id === id ? { ...task, ...updates } : task))
-    }));
+  async function logout() {
+    await run('Logging out', async () => {
+      await api('/api/auth/logout', { method: 'POST' });
+    });
+    localStorage.removeItem(tokenKey);
+    setToken('');
+    setDashboard(null);
+    setPanel(null);
+    setBrief(null);
+  }
+
+  async function patchProfile(body) {
+    await run('Saving profile', async () => {
+      const data = await api('/api/profile', { method: 'PATCH', body });
+      setDashboard(data);
+    });
+  }
+
+  async function createTask(task) {
+    await run('Adding task', async () => {
+      const data = await api('/api/tasks', { method: 'POST', body: task });
+      setDashboard(data);
+    });
+  }
+
+  async function updateTask(taskId, body) {
+    await run('Updating task', async () => {
+      const data = await api(`/api/tasks/${taskId}`, { method: 'PATCH', body });
+      setDashboard(data);
+    });
   }
 
   async function completeTask(task) {
-    const actualMinutes = Math.max(5, Math.round(Number(task.effortMinutes || 30) * (Number(task.progress || 80) / 100)));
-    updateTask(task.id, { status: 'done', progress: 100 });
-    await runAi('Creating completion insight', async () => {
-      const data = await postJson('/api/ai/victory', { task, actualMinutes, profile: state.profile });
-      setPanel({ type: 'victory', task, data });
-      patchState((current) => ({
-        ...current,
-        activity: [`Saved "${task.title}". +25 rescue points.`, ...current.activity].slice(0, 10)
-      }));
-    });
-  }
-
-  async function smartNudge(task) {
-    await runAi('Writing smart nudge', async () => {
-      const data = await postJson('/api/ai/nudge', { task, profile: state.profile });
-      setPanel({ type: 'nudge', task, data });
-    });
-  }
-
-  async function breakdown(task) {
-    await runAi('Breaking task down', async () => {
-      const data = await postJson('/api/ai/breakdown', { task });
-      setPanel({ type: 'breakdown', task, data });
-    });
-  }
-
-  async function lastLight(task) {
-    await runAi('Entering Last Light', async () => {
-      const data = await postJson('/api/ai/last-light', {
-        task,
-        minutesLeft: task.heat.minutesLeft,
-        profile: state.profile
+    await run('Moving task to Finished', async () => {
+      const data = await api(`/api/tasks/${task.id}/complete`, { method: 'POST' });
+      setDashboard(data);
+      setTab('finished');
+      setPanel({
+        title: 'Moved to Finished',
+        body: `"${task.title}" is no longer on your live board. Clean board, clean brain.`
       });
-      setPanel({ type: 'lastLight', task, data });
     });
   }
 
-  async function replan(disruption) {
-    await runAi('Replanning your board', async () => {
-      const data = await postJson('/api/ai/replan', {
-        tasks: tasksWithHeat,
-        disruption,
-        profile: state.profile
-      });
-      setPanel({ type: 'replan', data, disruption });
-      patchState((current) => ({
-        ...current,
-        activity: [`Replanned after: ${disruption}.`, ...current.activity].slice(0, 10)
-      }));
+  async function aiBrief() {
+    await run('Creating daily signal', async () => {
+      const data = await api('/api/ai/brief', { method: 'POST' });
+      setBrief(data);
+      setPanel({ title: data.headline, lines: data.lines, body: data.firstMove });
     });
   }
 
-  function addFriend(username) {
-    const clean = username.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
-    if (!clean) return;
-    patchState((current) => ({
-      ...current,
-      friends: [{ id: crypto.randomUUID(), username: clean, points: 0 }, ...current.friends]
-    }));
+  async function aiAction(type, task) {
+    const route = type === 'nudge' ? '/api/ai/nudge' : type === 'breakdown' ? '/api/ai/breakdown' : '/api/ai/last-light';
+    await run('Asking Gemini', async () => {
+      const data = await api(route, { method: 'POST', body: { taskId: task.id } });
+      if (type === 'breakdown') {
+        setPanel({ title: 'Break it down', body: data.summary, steps: data.steps });
+      } else if (type === 'last') {
+        setPanel({ title: data.headline, lines: data.moves, body: data.askFriend });
+      } else {
+        setPanel({ title: data.type, body: data.message, lines: [`Safe snooze: ${data.safeSnoozeMinutes} min`, data.friendHelp] });
+      }
+    });
   }
 
-  function sendFlare(task, friend, kind) {
-    const points = kind === 'Take over allowed subtask' ? 25 : 10;
-    const flare = {
-      id: crypto.randomUUID(),
-      taskId: task.id,
-      taskTitle: task.title,
-      friend: friend.username,
-      kind,
-      status: 'sent',
-      createdAt: new Date().toISOString()
-    };
-    patchState((current) => ({
-      ...current,
-      flares: [flare, ...current.flares],
-      friends: current.friends.map((item) =>
-        item.id === friend.id ? { ...item, points: item.points + points } : item
-      ),
-      activity: [`Sent a flare to ${friend.username}: ${kind}.`, ...current.activity].slice(0, 10)
-    }));
+  async function sendFriendRequest(username) {
+    await run('Sending friend request', async () => {
+      const data = await api('/api/friends/request', { method: 'POST', body: { username } });
+      setDashboard(data);
+    });
+  }
+
+  async function respondFriend(requestId, action) {
+    await run('Updating friend request', async () => {
+      const data = await api(`/api/friends/${requestId}/respond`, { method: 'POST', body: { action } });
+      setDashboard(data);
+    });
+  }
+
+  async function sendFlare(task, body) {
+    await run('Sending flare', async () => {
+      const data = await api(`/api/tasks/${task.id}/flares`, { method: 'POST', body });
+      setDashboard(data);
+      setPanel({ title: 'Flare sent', body: `Your request for "${task.title}" is waiting for a friend to accept or reject.` });
+    });
+  }
+
+  async function respondFlare(requestId, action) {
+    await run('Updating flare', async () => {
+      const data = await api(`/api/flares/${requestId}/respond`, { method: 'POST', body: { action } });
+      setDashboard(data);
+    });
+  }
+
+  if (!token || !dashboard) {
+    return <Login onSubmit={login} error={error} loading={loading} />;
   }
 
   return (
-    <main className={lastLightTask ? 'app danger' : 'app'}>
+    <main className={lastLight ? 'app alert' : 'app'}>
+      {!dashboard.user.tutorialSeen && <Tutorial onDone={() => patchProfile({ tutorialSeen: true })} />}
+
       <header className="topbar">
         <div>
-          <p className="eyebrow">AI deadline rescue companion</p>
+          <p className="eyebrow">AI deadline rescue</p>
           <h1>Flicker</h1>
+          <p>Welcome, @{dashboard.user.username}. Keep live work simple. Move done work out of the way.</p>
         </div>
-        <div className="profile">
+        <div className="top-actions">
           <label>
             Energy
-            <select
-              value={state.profile.energy}
-              onChange={(event) =>
-                patchState((current) => ({
-                  ...current,
-                  profile: { ...current.profile, energy: event.target.value }
-                }))
-              }
-            >
+            <select value={dashboard.user.energy} onChange={(event) => patchProfile({ energy: event.target.value })}>
               <option value="low">Low</option>
               <option value="okay">Okay</option>
               <option value="high">High</option>
             </select>
           </label>
-          <button onClick={generateBrief}>Refresh brief</button>
+          <button onClick={aiBrief}>Daily Signal</button>
+          <button className="secondary" onClick={logout}>Logout</button>
         </div>
       </header>
 
-      {lastLightTask && (
-        <section className="last-banner">
-          <strong>Last Light is active.</strong>
-          <span>{lastLightTask.title} has {formatTimeLeft(lastLightTask.heat.minutesLeft)}.</span>
-          <button onClick={() => lastLight(lastLightTask)}>Show 3 moves</button>
+      {lastLight && (
+        <section className="banner">
+          <strong>Last Light:</strong>
+          <span>{lastLight.title} has {timeLeft(lastLight.heat.minutesLeft)}.</span>
+          <button onClick={() => aiAction('last', lastLight)}>Show 3 moves</button>
         </section>
       )}
 
-      <section className="grid">
-        <aside className="left">
-          <section className="panel hero">
-            <p className="eyebrow">Morning brief</p>
-            <h2>{brief?.headline || 'Flicker is scanning your day.'}</h2>
-            <ul>
-              {(brief?.lines || ['Add tasks, set deadlines, and Flicker will turn reminders into action nudges.']).map(
-                (line) => (
-                  <li key={line}>{line}</li>
-                )
-              )}
-            </ul>
-            {brief?.firstMove && <p className="first-move">{brief.firstMove}</p>}
-          </section>
+      {error && <div className="error">{error}</div>}
+      {loading && <div className="loading">{loading}</div>}
 
-          <TaskForm draft={draft} setDraft={setDraft} addTask={addTask} />
-          <Friends
-            friends={state.friends}
-            flares={state.flares}
-            profile={state.profile}
-            missedTasks={missedTasks}
-            addFriend={addFriend}
-            patchState={patchState}
-          />
-        </aside>
+      <nav className="tabs">
+        {[
+          ['live', `Live (${liveTasks.length})`],
+          ['finished', `Finished (${completedTasks.length})`],
+          ['crew', `Crew (${dashboard.friends.length})`],
+          ['requests', `Requests (${dashboard.incomingHelpRequests.filter((r) => r.status === 'pending').length})`]
+        ].map(([key, label]) => (
+          <button key={key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>
+            {label}
+          </button>
+        ))}
+      </nav>
 
-        <section className="center">
-          <div className="section-head">
-            <div>
-              <p className="eyebrow">Today board</p>
-              <h2>Act before it burns out</h2>
-            </div>
-            <div className="loading">{loading}</div>
-          </div>
-
-          <div className="tasks">
-            {tasksWithHeat.map((task) => (
-              <TaskCard
-                key={task.id}
-                task={task}
-                friends={state.friends}
-                updateTask={updateTask}
-                completeTask={completeTask}
-                smartNudge={smartNudge}
-                breakdown={breakdown}
-                lastLight={lastLight}
-                sendFlare={sendFlare}
-              />
-            ))}
-          </div>
+      <section className="layout">
+        <section className="main-panel">
+          {tab === 'live' && (
+            <LivePage
+              tasks={liveTasks}
+              friends={dashboard.friends}
+              brief={brief}
+              createTask={createTask}
+              updateTask={updateTask}
+              completeTask={completeTask}
+              aiAction={aiAction}
+              sendFlare={sendFlare}
+            />
+          )}
+          {tab === 'finished' && <FinishedPage tasks={completedTasks} />}
+          {tab === 'crew' && (
+            <CrewPage
+              dashboard={dashboard}
+              sendFriendRequest={sendFriendRequest}
+              respondFriend={respondFriend}
+              patchProfile={patchProfile}
+            />
+          )}
+          {tab === 'requests' && (
+            <RequestsPage
+              incoming={dashboard.incomingHelpRequests}
+              outgoing={dashboard.outgoingHelpRequests}
+              respondFlare={respondFlare}
+            />
+          )}
         </section>
 
-        <aside className="right">
+        <aside className="side">
           <AiPanel panel={panel} />
-          <section className="panel">
-            <p className="eyebrow">Life happened</p>
-            <h3>Replan without guilt</h3>
-            {['Got sick', 'Meeting ran over', 'Lost motivation', 'Urgent work came up'].map((item) => (
-              <button className="wide" key={item} onClick={() => replan(item)}>
-                {item}
-              </button>
-            ))}
-          </section>
-          <section className="panel">
-            <p className="eyebrow">Crew activity</p>
-            <div className="feed">
-              {state.activity.map((item, index) => (
-                <p key={`${item}-${index}`}>{item}</p>
-              ))}
-            </div>
-          </section>
+          <Activity activity={dashboard.activity} />
         </aside>
       </section>
     </main>
   );
 }
 
-function TaskForm({ draft, setDraft, addTask }) {
+function Login({ onSubmit, error, loading }) {
+  const [mode, setMode] = useState('login');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+
+  function submit(event) {
+    event.preventDefault();
+    onSubmit(mode, username, password);
+  }
+
   return (
-    <form className="panel task-form" onSubmit={addTask}>
-      <p className="eyebrow">Add task</p>
-      <input
-        value={draft.title}
-        onChange={(event) => setDraft({ ...draft, title: event.target.value })}
-        placeholder="What needs saving?"
-      />
-      <div className="two">
+    <main className="login-page">
+      <section className="login-card">
+        <p className="eyebrow">Flicker</p>
+        <h1>Stop letting reminders die quietly.</h1>
+        <p>Create two accounts in two browser windows to test friend requests and task help requests manually.</p>
+        <form onSubmit={submit}>
+          <input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="username" />
+          <input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="password" type="password" />
+          <button type="submit">{mode === 'login' ? 'Login' : 'Create account'}</button>
+        </form>
+        <button className="text-button" onClick={() => setMode(mode === 'login' ? 'register' : 'login')}>
+          {mode === 'login' ? 'Need an account? Create one' : 'Already have an account? Login'}
+        </button>
+        {loading && <p className="loading">{loading}</p>}
+        {error && <p className="error">{error}</p>}
+      </section>
+    </main>
+  );
+}
+
+function Tutorial({ onDone }) {
+  return (
+    <div className="modal-backdrop">
+      <section className="modal">
+        <p className="eyebrow">Quick tour</p>
+        <h2>Flicker is simple.</h2>
+        <ol>
+          <li><strong>Live</strong> is only for tasks you still need to finish.</li>
+          <li><strong>Finished</strong> keeps completed tasks away from today’s noise.</li>
+          <li><strong>Crew</strong> lets you add friends by username.</li>
+          <li><strong>Requests</strong> is where friends accept or reject your flares.</li>
+        </ol>
+        <button onClick={onDone}>Got it</button>
+      </section>
+    </div>
+  );
+}
+
+function LivePage({ tasks, friends, brief, createTask, updateTask, completeTask, aiAction, sendFlare }) {
+  return (
+    <div className="stack">
+      <section className="card signal">
+        <div>
+          <p className="eyebrow">Daily Signal</p>
+          <h2>{brief?.headline || 'Click Daily Signal for a simple plan.'}</h2>
+          {brief?.firstMove && <p>{brief.firstMove}</p>}
+        </div>
+      </section>
+      <TaskForm createTask={createTask} />
+      <section className="stack">
+        {tasks.length === 0 ? (
+          <Empty title="No live tasks" body="Add one task, then use Smart Nudge or send a Flare if you get stuck." />
+        ) : (
+          tasks.map((task) => (
+            <TaskCard
+              key={task.id}
+              task={task}
+              friends={friends}
+              updateTask={updateTask}
+              completeTask={completeTask}
+              aiAction={aiAction}
+              sendFlare={sendFlare}
+            />
+          ))
+        )}
+      </section>
+    </div>
+  );
+}
+
+function TaskForm({ createTask }) {
+  const [task, setTask] = useState({
+    title: '',
+    deadline: soon(24),
+    effortMinutes: 30,
+    importance: 3,
+    category: 'General',
+    notes: '',
+    canAskFriend: true
+  });
+
+  function submit(event) {
+    event.preventDefault();
+    createTask(task);
+    setTask({ ...task, title: '', notes: '' });
+  }
+
+  return (
+    <form className="card form" onSubmit={submit}>
+      <p className="eyebrow">Add live task</p>
+      <input value={task.title} onChange={(event) => setTask({ ...task, title: event.target.value })} placeholder="Task name" />
+      <div className="form-grid">
         <label>
           Deadline
-          <input
-            type="datetime-local"
-            value={draft.deadline}
-            onChange={(event) => setDraft({ ...draft, deadline: event.target.value })}
-          />
+          <input type="datetime-local" value={task.deadline} onChange={(event) => setTask({ ...task, deadline: event.target.value })} />
         </label>
         <label>
-          Effort
-          <input
-            type="number"
-            min="5"
-            step="5"
-            value={draft.effortMinutes}
-            onChange={(event) => setDraft({ ...draft, effortMinutes: event.target.value })}
-          />
+          Effort minutes
+          <input type="number" min="5" step="5" value={task.effortMinutes} onChange={(event) => setTask({ ...task, effortMinutes: event.target.value })} />
         </label>
-      </div>
-      <div className="two">
         <label>
           Importance
-          <select
-            value={draft.importance}
-            onChange={(event) => setDraft({ ...draft, importance: event.target.value })}
-          >
-            <option value="1">1 - light</option>
-            <option value="3">3 - normal</option>
-            <option value="5">5 - serious</option>
+          <select value={task.importance} onChange={(event) => setTask({ ...task, importance: event.target.value })}>
+            <option value="1">Low</option>
+            <option value="3">Normal</option>
+            <option value="5">High</option>
           </select>
         </label>
         <label>
           Category
-          <input
-            value={draft.category}
-            onChange={(event) => setDraft({ ...draft, category: event.target.value })}
-          />
+          <input value={task.category} onChange={(event) => setTask({ ...task, category: event.target.value })} />
         </label>
       </div>
-      <textarea
-        value={draft.notes}
-        onChange={(event) => setDraft({ ...draft, notes: event.target.value })}
-        placeholder="Notes, context, blockers..."
-      />
+      <textarea value={task.notes} onChange={(event) => setTask({ ...task, notes: event.target.value })} placeholder="Optional notes" />
       <label className="check">
-        <input
-          type="checkbox"
-          checked={draft.canAskFriend}
-          onChange={(event) => setDraft({ ...draft, canAskFriend: event.target.checked })}
-        />
-        Allow friend support
+        <input type="checkbox" checked={task.canAskFriend} onChange={(event) => setTask({ ...task, canAskFriend: event.target.checked })} />
+        Allow friend help for this task
       </label>
-      <button type="submit">Add to Flicker</button>
+      <button type="submit">Add task</button>
     </form>
   );
 }
 
-function TaskCard({ task, friends, updateTask, completeTask, smartNudge, breakdown, lastLight, sendFlare }) {
-  const [showFlare, setShowFlare] = useState(false);
+function TaskCard({ task, friends, updateTask, completeTask, aiAction, sendFlare }) {
+  const [friendId, setFriendId] = useState('');
+  const [kind, setKind] = useState('Focus sprint');
+  const [message, setMessage] = useState('');
 
   return (
-    <article className={`task ${task.heat.className}`}>
-      <div className="task-top">
+    <article className={`card task ${task.heat.className}`}>
+      <div className="task-head">
         <div>
-          <span className="pill">{task.heat.label}</span>
+          <span className="heat">{task.heat.label}</span>
           <h3>{task.title}</h3>
-          <p>
-            {task.category} · {task.status === 'done' ? 'completed' : formatTimeLeft(task.heat.minutesLeft)} ·{' '}
-            {task.effortMinutes} min estimate
-          </p>
+          <p>{task.category} · {timeLeft(task.heat.minutesLeft)} · {task.effortMinutes} min</p>
         </div>
-        <button className="ghost" onClick={() => completeTask(task)} disabled={task.status === 'done'}>
-          {task.status === 'done' ? 'Saved' : 'Complete'}
-        </button>
+        <button onClick={() => completeTask(task)}>Done</button>
       </div>
-      <div className="progress">
-        <span style={{ width: `${task.progress}%` }} />
+      <div className="progress"><span style={{ width: `${task.progress || 0}%` }} /></div>
+      <label>
+        Progress: {task.progress || 0}%
+        <input type="range" min="0" max="100" value={task.progress || 0} onChange={(event) => updateTask(task.id, { progress: Number(event.target.value) })} />
+      </label>
+      {task.notes && <p className="muted">{task.notes}</p>}
+      <div className="button-row">
+        <button className="secondary" onClick={() => aiAction('nudge', task)}>Smart Nudge</button>
+        <button className="secondary" onClick={() => aiAction('breakdown', task)}>Break Down</button>
+        <button className="secondary danger-button" onClick={() => aiAction('last', task)}>Last Light</button>
       </div>
-      <input
-        type="range"
-        min="0"
-        max="100"
-        value={task.progress}
-        onChange={(event) => updateTask(task.id, { progress: Number(event.target.value) })}
-      />
-      {task.notes && <p className="notes">{task.notes}</p>}
-      <div className="actions">
-        <button onClick={() => smartNudge(task)}>Smart nudge</button>
-        <button onClick={() => breakdown(task)}>Break it down</button>
-        <button onClick={() => lastLight(task)}>Last Light</button>
-        <button onClick={() => setShowFlare(!showFlare)} disabled={!task.canAskFriend}>
-          Send flare
-        </button>
-      </div>
-      {showFlare && (
+      {task.canAskFriend && (
         <div className="flare-box">
-          {friends.map((friend) => (
-            <div key={friend.id} className="friend-row">
-              <span>@{friend.username}</span>
-              <button onClick={() => sendFlare(task, friend, 'Focus sprint')}>Focus</button>
-              <button onClick={() => sendFlare(task, friend, 'Review / unblock')}>Review</button>
-              <button onClick={() => sendFlare(task, friend, 'Reminder check-in')}>Remind</button>
-              <button onClick={() => sendFlare(task, friend, 'Take over allowed subtask')}>Takeover</button>
-            </div>
-          ))}
+          <p className="eyebrow">Send a Flare</p>
+          {friends.length === 0 ? (
+            <p className="muted">Add a friend in Crew first.</p>
+          ) : (
+            <>
+              <div className="form-grid compact">
+                <select value={friendId} onChange={(event) => setFriendId(event.target.value)}>
+                  <option value="">Choose friend</option>
+                  {friends.map((friend) => <option key={friend.id} value={friend.id}>@{friend.username}</option>)}
+                </select>
+                <select value={kind} onChange={(event) => setKind(event.target.value)}>
+                  <option>Focus sprint</option>
+                  <option>Review / unblock</option>
+                  <option>Reminder check-in</option>
+                  <option>Take over allowed subtask</option>
+                </select>
+              </div>
+              <input value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Short message for your friend" />
+              <button
+                className="secondary"
+                disabled={!friendId}
+                onClick={() => sendFlare(task, { friendId, kind, message })}
+              >
+                Send request
+              </button>
+            </>
+          )}
         </div>
       )}
     </article>
   );
 }
 
-function Friends({ friends, flares, profile, missedTasks, addFriend, patchState }) {
-  const [username, setUsername] = useState('');
+function FinishedPage({ tasks }) {
   return (
-    <section className="panel">
-      <p className="eyebrow">Panic Crew</p>
-      <h3>Send a flare when stuck</h3>
-      <div className="inline">
-        <input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="friend username" />
-        <button
-          onClick={() => {
-            addFriend(username);
-            setUsername('');
-          }}
-        >
-          Add
-        </button>
-      </div>
-      <div className="crew">
-        {friends.map((friend) => (
-          <span key={friend.id}>@{friend.username} · {friend.points} pts</span>
+    <div className="stack">
+      {tasks.length === 0 ? (
+        <Empty title="Nothing finished yet" body="When you mark a live task done, it moves here." />
+      ) : (
+        tasks.map((task) => (
+          <article className="card finished" key={task.id}>
+            <span className="heat done">Finished</span>
+            <h3>{task.title}</h3>
+            <p>{task.category} · completed {new Date(task.completed_at).toLocaleString()}</p>
+          </article>
+        ))
+      )}
+    </div>
+  );
+}
+
+function CrewPage({ dashboard, sendFriendRequest, respondFriend, patchProfile }) {
+  const [username, setUsername] = useState('');
+
+  return (
+    <div className="stack">
+      <section className="card form">
+        <p className="eyebrow">Add friend</p>
+        <div className="inline">
+          <input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="friend username" />
+          <button onClick={() => { sendFriendRequest(username); setUsername(''); }}>Send request</button>
+        </div>
+      </section>
+
+      <section className="card">
+        <p className="eyebrow">Friends</p>
+        {dashboard.friends.length === 0 ? <p className="muted">No friends yet.</p> : dashboard.friends.map((friend) => (
+          <p key={friend.id}>@{friend.username} · {friend.rescuePoints || 0} rescue points</p>
         ))}
-      </div>
-      <label className="check">
-        <input
-          type="checkbox"
-          checked={profile.publicMisses}
-          onChange={(event) =>
-            patchState((current) => ({
-              ...current,
-              profile: { ...current.profile, publicMisses: event.target.checked }
-            }))
-          }
-        />
-        Share missed-task activity
-      </label>
-      <label className="check">
-        <input
-          type="checkbox"
-          checked={profile.showTaskNames}
-          onChange={(event) =>
-            patchState((current) => ({
-              ...current,
-              profile: { ...current.profile, showTaskNames: event.target.checked }
-            }))
-          }
-        />
-        Include task names in public activity
-      </label>
-      <div className="feed">
-        {profile.publicMisses &&
-          missedTasks.slice(0, 1).map((task) => (
-            <p key={task.id}>
-              Public activity: missed {profile.showTaskNames ? `"${task.title}"` : '1 task'}. Recovery plan ready.
-            </p>
-          ))}
-        {flares.slice(0, 3).map((flare) => (
-          <p key={flare.id}>Flare sent to @{flare.friend}: {flare.kind}</p>
+      </section>
+
+      <section className="card">
+        <p className="eyebrow">Friend requests</p>
+        {dashboard.incomingFriendRequests.length === 0 && dashboard.outgoingFriendRequests.length === 0 && <p className="muted">No friend requests.</p>}
+        {dashboard.incomingFriendRequests.map((request) => (
+          <div className="request" key={request.id}>
+            <span>@{request.username} wants to connect.</span>
+            <button onClick={() => respondFriend(request.id, 'accept')}>Accept</button>
+            <button className="secondary" onClick={() => respondFriend(request.id, 'reject')}>Reject</button>
+          </div>
         ))}
-      </div>
-    </section>
+        {dashboard.outgoingFriendRequests.map((request) => (
+          <p className="muted" key={request.id}>Waiting for @{request.username} to accept.</p>
+        ))}
+      </section>
+
+      <section className="card">
+        <p className="eyebrow">Privacy</p>
+        <label className="check">
+          <input type="checkbox" checked={dashboard.user.publicMisses} onChange={(event) => patchProfile({ publicMisses: event.target.checked })} />
+          Let friends see that I missed one task
+        </label>
+        <label className="check">
+          <input type="checkbox" checked={dashboard.user.showTaskNames} onChange={(event) => patchProfile({ showTaskNames: event.target.checked })} />
+          Include task names in shared activity
+        </label>
+      </section>
+    </div>
+  );
+}
+
+function RequestsPage({ incoming, outgoing, respondFlare }) {
+  return (
+    <div className="stack">
+      <section className="card">
+        <p className="eyebrow">Requests for you</p>
+        {incoming.length === 0 ? <p className="muted">No incoming flares.</p> : incoming.map((request) => (
+          <div className="request vertical" key={request.id}>
+            <div>
+              <h3>{request.taskTitle}</h3>
+              <p>@{request.ownerUsername} needs: {request.kind}</p>
+              {request.message && <p className="muted">{request.message}</p>}
+              <span className={`status ${request.status}`}>{request.status}</span>
+            </div>
+            {request.status === 'pending' && (
+              <div className="button-row">
+                <button onClick={() => respondFlare(request.id, 'accept')}>Volunteer</button>
+                <button className="secondary" onClick={() => respondFlare(request.id, 'reject')}>Reject</button>
+              </div>
+            )}
+          </div>
+        ))}
+      </section>
+
+      <section className="card">
+        <p className="eyebrow">Requests you sent</p>
+        {outgoing.length === 0 ? <p className="muted">No sent flares.</p> : outgoing.map((request) => (
+          <p key={request.id}>
+            @{request.friendUsername}: {request.kind} for "{request.taskTitle}" · <span className={`status ${request.status}`}>{request.status}</span>
+          </p>
+        ))}
+      </section>
+    </div>
   );
 }
 
 function AiPanel({ panel }) {
   return (
-    <section className="panel ai-panel">
-      <p className="eyebrow">Gemini output</p>
-      {panel.type === 'brief' && (
+    <section className="card ai">
+      <p className="eyebrow">AI help</p>
+      {!panel ? (
+        <p className="muted">Use Daily Signal, Smart Nudge, Break Down, or Last Light.</p>
+      ) : (
         <>
-          <h3>Daily signal</h3>
-          <p>{panel.data?.firstMove || 'Ask for a nudge, breakdown, replan, or Last Light rescue.'}</p>
+          <h3>{panel.title}</h3>
+          {panel.body && <p>{panel.body}</p>}
+          {panel.lines?.map((line) => <p className="muted" key={line}>{line}</p>)}
+          {panel.steps?.map((step) => <p className="muted" key={step.title}>{step.title} · {step.minutes} min</p>)}
         </>
       )}
-      {panel.type === 'nudge' && (
-        <>
-          <h3>{panel.data.type}</h3>
-          <p>{panel.data.message}</p>
-          <div className="chips">
-            {panel.data.actions?.map((action) => <span key={action}>{action}</span>)}
-          </div>
-          <p className="muted">Safe snooze: {panel.data.safeSnoozeMinutes} min</p>
-        </>
-      )}
-      {panel.type === 'breakdown' && (
-        <>
-          <h3>Break it down</h3>
-          <p>{panel.data.summary}</p>
-          <ol>
-            {panel.data.steps?.map((step) => (
-              <li key={step.title}>{step.title} · {step.minutes} min</li>
-            ))}
-          </ol>
-        </>
-      )}
-      {panel.type === 'lastLight' && (
-        <>
-          <h3>Last Light</h3>
-          <p>{panel.data.headline}</p>
-          <ol>
-            {panel.data.moves?.map((move) => <li key={move}>{move}</li>)}
-          </ol>
-          <p className="muted">Drop: {panel.data.drop}</p>
-        </>
-      )}
-      {panel.type === 'replan' && (
-        <>
-          <h3>New plan</h3>
-          <p>{panel.data.headline}</p>
-          <h4>Keep</h4>
-          {panel.data.keep?.map((item) => <p key={item}>{item}</p>)}
-          <h4>Move</h4>
-          {panel.data.move?.map((item) => <p key={item}>{item}</p>)}
-          <h4>Ask for help</h4>
-          {panel.data.askForHelp?.map((item) => <p key={item}>{item}</p>)}
-        </>
-      )}
-      {panel.type === 'victory' && (
-        <>
-          <h3>{panel.data.headline}</h3>
-          <p>{panel.data.insight}</p>
-          <p className="muted">{panel.data.nextTime}</p>
-        </>
-      )}
+    </section>
+  );
+}
+
+function Activity({ activity }) {
+  return (
+    <section className="card">
+      <p className="eyebrow">Activity</p>
+      {activity.length === 0 ? <p className="muted">No activity yet.</p> : activity.map((item) => (
+        <p className="activity" key={item.id}>{item.message}</p>
+      ))}
+    </section>
+  );
+}
+
+function Empty({ title, body }) {
+  return (
+    <section className="card empty">
+      <h3>{title}</h3>
+      <p>{body}</p>
     </section>
   );
 }

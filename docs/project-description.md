@@ -8,7 +8,7 @@ The Last-Minute Life Saver
 
 Flicker is an AI-powered productivity companion that helps users plan calmly, react quickly, and ask for support when deadlines become risky.
 
-Traditional reminder apps are passive. They tell users that something is due, but they do not help users decide what to do next. Flicker turns reminders into action nudges. It analyzes each task using deadline, effort, importance, progress, and user energy. When a task becomes urgent, Flicker activates Last Light mode and gives the user the next three moves. If the user needs human support, they can send a Flare to a friend for a focus sprint, review, reminder, or unblock request.
+Traditional reminder apps are passive. They tell users that something is due, but they do not help users decide what to do next. Flicker turns reminders into action nudges. It analyzes each task using deadline, effort, importance, progress, and user energy. When a task becomes urgent, Flicker activates Last Light mode and gives the user the next three moves. If the user needs human support, they can send a Flare to a friend for a focus sprint, review, reminder, or allowed shared subtask request.
 
 ## Key Features
 
@@ -17,8 +17,11 @@ Traditional reminder apps are passive. They tell users that something is due, bu
 - **Smart Nudges:** Reminders include a specific next action, safe snooze time, and trade-off awareness.
 - **Last Light Mode:** Emergency mode for deadlines under 2 hours.
 - **Break It Down:** Gemini splits overwhelming work into smaller steps.
-- **Life Happened:** User selects a disruption and Gemini replans the task board.
+- **Live And Finished Pages:** Current tasks stay on the Live page. Completed tasks move to Finished.
+- **First-Login Tutorial:** New users get a short guide the first time they sign in.
 - **Panic Crew:** Users add friends by username and send a Flare when they need support.
+- **Friend Request Flow:** Friends can accept or reject connection requests.
+- **Flare Response Flow:** Friends can volunteer or reject task help requests.
 - **Allowed Subtask Takeover:** For appropriate shared tasks, friends can accept a takeover request and earn extra rescue points.
 - **Rescue Points:** Friends earn points for supporting focus sprints, reminders, and deadline saves.
 - **Privacy Controls:** Users control whether missed-task activity is shared and whether task names are visible.
@@ -30,7 +33,7 @@ Traditional reminder apps are passive. They tell users that something is due, bu
 - Vite
 - Express.js
 - Gemini API
-- LocalStorage for MVP persistence
+- SQLite database
 - Node.js
 
 ## Google Technologies Utilized
@@ -51,8 +54,8 @@ Flicker is not just another to-do list. It combines practical AI planning with s
 4. Use Smart Nudge to get a specific next action.
 5. Use Break It Down for a large task.
 6. Trigger Last Light mode for an urgent task.
-7. Send a Flare to a friend for focus or review support.
-8. Complete the task and show Gemini's completion insight.
+7. Log into a second account and accept or reject the Flare.
+8. Complete the task and show that it moves from Live to Finished.
 
 ## Submission Checklist
 

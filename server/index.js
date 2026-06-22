@@ -2,15 +2,99 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
+import { randomBytes, scryptSync, timingSafeEqual } from 'crypto';
+import { DatabaseSync } from 'node:sqlite';
 import { GoogleGenAI } from '@google/genai';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
 const app = express();
 const port = process.env.PORT || 8080;
 const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const dataDir = path.join(__dirname, 'data');
+const dbPath = process.env.SQLITE_PATH || path.join(dataDir, 'flicker.sqlite');
+
+fs.mkdirSync(dataDir, { recursive: true });
+
+const db = new DatabaseSync(dbPath);
+db.exec('PRAGMA foreign_keys = ON');
+db.exec(`
+  CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    username TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    salt TEXT NOT NULL,
+    energy TEXT DEFAULT 'okay',
+    tutorial_seen INTEGER DEFAULT 0,
+    public_misses INTEGER DEFAULT 0,
+    show_task_names INTEGER DEFAULT 0,
+    rescue_points INTEGER DEFAULT 0,
+    created_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS sessions (
+    token TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS tasks (
+    id TEXT PRIMARY KEY,
+    owner_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    deadline TEXT NOT NULL,
+    effort_minutes INTEGER NOT NULL,
+    importance INTEGER NOT NULL,
+    category TEXT DEFAULT 'General',
+    notes TEXT DEFAULT '',
+    progress INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'active',
+    can_ask_friend INTEGER DEFAULT 1,
+    completed_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS friendships (
+    id TEXT PRIMARY KEY,
+    requester_id TEXT NOT NULL,
+    addressee_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (requester_id, addressee_id),
+    FOREIGN KEY (requester_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (addressee_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS help_requests (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    owner_id TEXT NOT NULL,
+    friend_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    message TEXT DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+    FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (friend_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS activity (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    message TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+`);
+
 const ai = process.env.GEMINI_API_KEY
   ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY })
   : null;
@@ -20,13 +104,75 @@ app.use(express.json({ limit: '1mb' }));
 
 const jsonRules = `
 Return valid JSON only. Do not include markdown, comments, or extra prose.
-Keep language normal, modern, and human. Avoid fantasy roleplay.
-Use the product vocabulary:
-- Flicker = task at risk
-- Nudge = action-oriented reminder
-- Flare = request sent to a friend for help
-- Last Light = emergency mode when time is almost gone
+Keep language simple and practical. Flicker should feel friendly, not confusing.
+Use these terms only when helpful:
+- Smart Nudge: one useful next action
+- Flare: a help request sent to a friend
+- Last Light: emergency mode when time is nearly gone
 `;
+
+function id() {
+  return randomBytes(16).toString('hex');
+}
+
+function now() {
+  return new Date().toISOString();
+}
+
+function hashPassword(password, salt = randomBytes(16).toString('hex')) {
+  return {
+    salt,
+    hash: scryptSync(password, salt, 64).toString('hex')
+  };
+}
+
+function verifyPassword(password, user) {
+  const attempt = scryptSync(password, user.salt, 64);
+  const stored = Buffer.from(user.password_hash, 'hex');
+  return stored.length === attempt.length && timingSafeEqual(stored, attempt);
+}
+
+function userView(user) {
+  return {
+    id: user.id,
+    username: user.username,
+    energy: user.energy,
+    tutorialSeen: Boolean(user.tutorial_seen),
+    publicMisses: Boolean(user.public_misses),
+    showTaskNames: Boolean(user.show_task_names),
+    rescuePoints: Number(user.rescue_points || 0)
+  };
+}
+
+function addActivity(userId, message) {
+  db.prepare('INSERT INTO activity (id, user_id, message, created_at) VALUES (?, ?, ?, ?)')
+    .run(id(), userId, message, now());
+}
+
+function auth(req, res, next) {
+  const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  if (!token) return res.status(401).json({ error: 'Missing token' });
+
+  const row = db.prepare(`
+    SELECT users.*
+    FROM sessions
+    JOIN users ON users.id = sessions.user_id
+    WHERE sessions.token = ?
+  `).get(token);
+
+  if (!row) return res.status(401).json({ error: 'Invalid token' });
+  req.user = row;
+  req.token = token;
+  next();
+}
+
+function friendshipBetween(userA, userB) {
+  return db.prepare(`
+    SELECT * FROM friendships
+    WHERE (requester_id = ? AND addressee_id = ?)
+       OR (requester_id = ? AND addressee_id = ?)
+  `).get(userA, userB, userB, userA);
+}
 
 function safeParseJson(text, fallback) {
   try {
@@ -46,7 +192,7 @@ async function generateJson(prompt, fallback) {
       contents: `${jsonRules}\n\n${prompt}`,
       config: {
         responseMimeType: 'application/json',
-        temperature: 0.7
+        temperature: 0.65
       }
     });
 
@@ -61,41 +207,320 @@ async function generateJson(prompt, fallback) {
   }
 }
 
-function summarizeTasks(tasks = []) {
-  return tasks.map((task) => ({
-    id: task.id,
-    title: task.title,
-    deadline: task.deadline,
-    effortMinutes: Number(task.effortMinutes || 0),
-    importance: Number(task.importance || 3),
-    progress: Number(task.progress || 0),
-    heat: task.heat,
-    status: task.status,
-    notes: task.notes || '',
-    canAskFriend: Boolean(task.canAskFriend)
-  }));
+function tasksFor(userId, status) {
+  return db.prepare(`
+    SELECT
+      tasks.*,
+      users.username AS owner_username
+    FROM tasks
+    JOIN users ON users.id = tasks.owner_id
+    WHERE tasks.owner_id = ? AND tasks.status = ?
+    ORDER BY datetime(tasks.deadline) ASC
+  `).all(userId, status);
+}
+
+function dashboard(userId) {
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+  const liveTasks = tasksFor(userId, 'active');
+  const completedTasks = db.prepare(`
+    SELECT * FROM tasks
+    WHERE owner_id = ? AND status = 'done'
+    ORDER BY datetime(completed_at) DESC
+  `).all(userId);
+
+  const friends = db.prepare(`
+    SELECT users.id, users.username, users.rescue_points AS rescuePoints
+    FROM friendships
+    JOIN users ON users.id = CASE
+      WHEN friendships.requester_id = ? THEN friendships.addressee_id
+      ELSE friendships.requester_id
+    END
+    WHERE (friendships.requester_id = ? OR friendships.addressee_id = ?)
+      AND friendships.status = 'accepted'
+    ORDER BY users.username ASC
+  `).all(userId, userId, userId);
+
+  const incomingFriendRequests = db.prepare(`
+    SELECT friendships.id, users.username, friendships.created_at AS createdAt
+    FROM friendships
+    JOIN users ON users.id = friendships.requester_id
+    WHERE friendships.addressee_id = ? AND friendships.status = 'pending'
+    ORDER BY datetime(friendships.created_at) DESC
+  `).all(userId);
+
+  const outgoingFriendRequests = db.prepare(`
+    SELECT friendships.id, users.username, friendships.created_at AS createdAt
+    FROM friendships
+    JOIN users ON users.id = friendships.addressee_id
+    WHERE friendships.requester_id = ? AND friendships.status = 'pending'
+    ORDER BY datetime(friendships.created_at) DESC
+  `).all(userId);
+
+  const incomingHelpRequests = db.prepare(`
+    SELECT
+      help_requests.*,
+      tasks.title AS taskTitle,
+      tasks.deadline,
+      tasks.effort_minutes AS effortMinutes,
+      users.username AS ownerUsername
+    FROM help_requests
+    JOIN tasks ON tasks.id = help_requests.task_id
+    JOIN users ON users.id = help_requests.owner_id
+    WHERE help_requests.friend_id = ?
+    ORDER BY datetime(help_requests.created_at) DESC
+  `).all(userId);
+
+  const outgoingHelpRequests = db.prepare(`
+    SELECT
+      help_requests.*,
+      tasks.title AS taskTitle,
+      users.username AS friendUsername
+    FROM help_requests
+    JOIN tasks ON tasks.id = help_requests.task_id
+    JOIN users ON users.id = help_requests.friend_id
+    WHERE help_requests.owner_id = ?
+    ORDER BY datetime(help_requests.created_at) DESC
+  `).all(userId);
+
+  const activity = db.prepare(`
+    SELECT id, message, created_at AS createdAt
+    FROM activity
+    WHERE user_id = ?
+    ORDER BY datetime(created_at) DESC
+    LIMIT 12
+  `).all(userId);
+
+  return {
+    user: userView(user),
+    liveTasks,
+    completedTasks,
+    friends,
+    incomingFriendRequests,
+    outgoingFriendRequests,
+    incomingHelpRequests,
+    outgoingHelpRequests,
+    activity
+  };
 }
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, ai: Boolean(ai), model });
+  res.json({ ok: true, ai: Boolean(ai), model, database: dbPath });
 });
 
-app.post('/api/ai/brief', async (req, res) => {
-  const { tasks = [], profile = {} } = req.body;
+app.post('/api/auth/register', (req, res) => {
+  const username = String(req.body.username || '').trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
+  const password = String(req.body.password || '');
+  if (username.length < 3) return res.status(400).json({ error: 'Username must be at least 3 characters.' });
+  if (password.length < 4) return res.status(400).json({ error: 'Password must be at least 4 characters.' });
+
+  const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
+  if (existing) return res.status(409).json({ error: 'Username already exists. Try logging in.' });
+
+  const passwordData = hashPassword(password);
+  const userId = id();
+  db.prepare(`
+    INSERT INTO users (id, username, password_hash, salt, created_at)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(userId, username, passwordData.hash, passwordData.salt, now());
+  addActivity(userId, 'Welcome to Flicker. Your live tasks will appear here.');
+
+  const token = id();
+  db.prepare('INSERT INTO sessions (token, user_id, created_at) VALUES (?, ?, ?)').run(token, userId, now());
+  res.json({ token, dashboard: dashboard(userId) });
+});
+
+app.post('/api/auth/login', (req, res) => {
+  const username = String(req.body.username || '').trim().toLowerCase();
+  const password = String(req.body.password || '');
+  const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
+  if (!user || !verifyPassword(password, user)) {
+    return res.status(401).json({ error: 'Invalid username or password.' });
+  }
+
+  const token = id();
+  db.prepare('INSERT INTO sessions (token, user_id, created_at) VALUES (?, ?, ?)').run(token, user.id, now());
+  res.json({ token, dashboard: dashboard(user.id) });
+});
+
+app.post('/api/auth/logout', auth, (req, res) => {
+  db.prepare('DELETE FROM sessions WHERE token = ?').run(req.token);
+  res.json({ ok: true });
+});
+
+app.get('/api/dashboard', auth, (req, res) => {
+  res.json(dashboard(req.user.id));
+});
+
+app.patch('/api/profile', auth, (req, res) => {
+  const energy = ['low', 'okay', 'high'].includes(req.body.energy) ? req.body.energy : req.user.energy;
+  const tutorialSeen = req.body.tutorialSeen === undefined ? req.user.tutorial_seen : Number(Boolean(req.body.tutorialSeen));
+  const publicMisses = req.body.publicMisses === undefined ? req.user.public_misses : Number(Boolean(req.body.publicMisses));
+  const showTaskNames = req.body.showTaskNames === undefined ? req.user.show_task_names : Number(Boolean(req.body.showTaskNames));
+
+  db.prepare(`
+    UPDATE users
+    SET energy = ?, tutorial_seen = ?, public_misses = ?, show_task_names = ?
+    WHERE id = ?
+  `).run(energy, tutorialSeen, publicMisses, showTaskNames, req.user.id);
+
+  res.json(dashboard(req.user.id));
+});
+
+app.post('/api/tasks', auth, (req, res) => {
+  const title = String(req.body.title || '').trim();
+  if (!title) return res.status(400).json({ error: 'Task title is required.' });
+
+  const taskId = id();
+  db.prepare(`
+    INSERT INTO tasks (
+      id, owner_id, title, deadline, effort_minutes, importance, category, notes,
+      progress, status, can_ask_friend, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 'active', ?, ?, ?)
+  `).run(
+    taskId,
+    req.user.id,
+    title,
+    req.body.deadline,
+    Number(req.body.effortMinutes || 30),
+    Number(req.body.importance || 3),
+    String(req.body.category || 'General'),
+    String(req.body.notes || ''),
+    Number(Boolean(req.body.canAskFriend ?? true)),
+    now(),
+    now()
+  );
+  addActivity(req.user.id, `Added "${title}" to live tasks.`);
+  res.json(dashboard(req.user.id));
+});
+
+app.patch('/api/tasks/:taskId', auth, (req, res) => {
+  const task = db.prepare('SELECT * FROM tasks WHERE id = ? AND owner_id = ?').get(req.params.taskId, req.user.id);
+  if (!task) return res.status(404).json({ error: 'Task not found.' });
+
+  db.prepare(`
+    UPDATE tasks
+    SET progress = ?, notes = ?, updated_at = ?
+    WHERE id = ? AND owner_id = ?
+  `).run(
+    Number(req.body.progress ?? task.progress),
+    String(req.body.notes ?? task.notes),
+    now(),
+    req.params.taskId,
+    req.user.id
+  );
+  res.json(dashboard(req.user.id));
+});
+
+app.post('/api/tasks/:taskId/complete', auth, (req, res) => {
+  const task = db.prepare('SELECT * FROM tasks WHERE id = ? AND owner_id = ?').get(req.params.taskId, req.user.id);
+  if (!task) return res.status(404).json({ error: 'Task not found.' });
+
+  db.prepare(`
+    UPDATE tasks
+    SET status = 'done', progress = 100, completed_at = ?, updated_at = ?
+    WHERE id = ? AND owner_id = ?
+  `).run(now(), now(), req.params.taskId, req.user.id);
+  addActivity(req.user.id, `Completed "${task.title}". Moved to Finished.`);
+  res.json(dashboard(req.user.id));
+});
+
+app.post('/api/friends/request', auth, (req, res) => {
+  const username = String(req.body.username || '').trim().toLowerCase();
+  const friend = db.prepare('SELECT id, username FROM users WHERE username = ?').get(username);
+  if (!friend) return res.status(404).json({ error: 'No user found with that username.' });
+  if (friend.id === req.user.id) return res.status(400).json({ error: 'You cannot add yourself.' });
+
+  const existing = friendshipBetween(req.user.id, friend.id);
+  if (existing) return res.status(409).json({ error: `Friend request already ${existing.status}.` });
+
+  db.prepare(`
+    INSERT INTO friendships (id, requester_id, addressee_id, status, created_at, updated_at)
+    VALUES (?, ?, ?, 'pending', ?, ?)
+  `).run(id(), req.user.id, friend.id, now(), now());
+  addActivity(req.user.id, `Sent friend request to @${friend.username}.`);
+  addActivity(friend.id, `@${req.user.username} sent you a friend request.`);
+  res.json(dashboard(req.user.id));
+});
+
+app.post('/api/friends/:requestId/respond', auth, (req, res) => {
+  const action = req.body.action === 'accept' ? 'accepted' : 'rejected';
+  const request = db.prepare(`
+    SELECT friendships.*, users.username AS requesterUsername
+    FROM friendships
+    JOIN users ON users.id = friendships.requester_id
+    WHERE friendships.id = ? AND friendships.addressee_id = ? AND friendships.status = 'pending'
+  `).get(req.params.requestId, req.user.id);
+  if (!request) return res.status(404).json({ error: 'Friend request not found.' });
+
+  db.prepare('UPDATE friendships SET status = ?, updated_at = ? WHERE id = ?')
+    .run(action, now(), req.params.requestId);
+  addActivity(req.user.id, `${action === 'accepted' ? 'Accepted' : 'Rejected'} @${request.requesterUsername}'s friend request.`);
+  addActivity(request.requester_id, `@${req.user.username} ${action === 'accepted' ? 'accepted' : 'rejected'} your friend request.`);
+  res.json(dashboard(req.user.id));
+});
+
+app.post('/api/tasks/:taskId/flares', auth, (req, res) => {
+  const task = db.prepare('SELECT * FROM tasks WHERE id = ? AND owner_id = ?').get(req.params.taskId, req.user.id);
+  if (!task) return res.status(404).json({ error: 'Task not found.' });
+  if (!task.can_ask_friend) return res.status(400).json({ error: 'Friend support is disabled for this task.' });
+
+  const friend = db.prepare('SELECT id, username FROM users WHERE id = ?').get(req.body.friendId);
+  if (!friend) return res.status(404).json({ error: 'Friend not found.' });
+
+  const friendship = friendshipBetween(req.user.id, friend.id);
+  if (!friendship || friendship.status !== 'accepted') {
+    return res.status(403).json({ error: 'You can only send flares to accepted friends.' });
+  }
+
+  const requestId = id();
+  const kind = String(req.body.kind || 'Focus sprint');
+  db.prepare(`
+    INSERT INTO help_requests (id, task_id, owner_id, friend_id, kind, message, status, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+  `).run(requestId, task.id, req.user.id, friend.id, kind, String(req.body.message || ''), now(), now());
+  addActivity(req.user.id, `Sent @${friend.username} a flare for "${task.title}".`);
+  addActivity(friend.id, `@${req.user.username} asked for help: ${kind} on "${task.title}".`);
+  res.json(dashboard(req.user.id));
+});
+
+app.post('/api/flares/:requestId/respond', auth, (req, res) => {
+  const action = req.body.action === 'accept' ? 'accepted' : 'rejected';
+  const request = db.prepare(`
+    SELECT help_requests.*, tasks.title, users.username AS ownerUsername
+    FROM help_requests
+    JOIN tasks ON tasks.id = help_requests.task_id
+    JOIN users ON users.id = help_requests.owner_id
+    WHERE help_requests.id = ? AND help_requests.friend_id = ? AND help_requests.status = 'pending'
+  `).get(req.params.requestId, req.user.id);
+  if (!request) return res.status(404).json({ error: 'Flare not found.' });
+
+  db.prepare('UPDATE help_requests SET status = ?, updated_at = ? WHERE id = ?')
+    .run(action, now(), req.params.requestId);
+  if (action === 'accepted') {
+    db.prepare('UPDATE users SET rescue_points = rescue_points + 25 WHERE id = ?').run(req.user.id);
+  }
+  addActivity(req.user.id, `${action === 'accepted' ? 'Accepted' : 'Rejected'} flare: ${request.kind} for "${request.title}".`);
+  addActivity(request.owner_id, `@${req.user.username} ${action === 'accepted' ? 'accepted' : 'rejected'} your flare for "${request.title}".`);
+  res.json(dashboard(req.user.id));
+});
+
+app.post('/api/ai/brief', auth, async (req, res) => {
+  const tasks = tasksFor(req.user.id, 'active');
   const fallback = {
-    headline: 'Today has a few moving parts. Start with the smallest risky task and build momentum.',
+    headline: 'Start with the soonest useful task.',
     lines: [
-      'Clear anything due soon before touching flexible work.',
-      'Use one short focus sprint to make visible progress.',
-      'Send a flare if a task needs another human to unblock it.'
+      'Finish one small task first to clear mental space.',
+      'Send a flare if a task needs another person.',
+      'Move finished work to the Finished page so Live stays clean.'
     ],
-    firstMove: 'Pick one task that takes under 20 minutes and finish it now.'
+    firstMove: tasks[0] ? `Open "${tasks[0].title}" and do 10 focused minutes.` : 'Add one task you need to protect today.'
   };
 
   const result = await generateJson(
-    `Create a short daily brief for this user.
-User profile: ${JSON.stringify(profile)}
-Tasks: ${JSON.stringify(summarizeTasks(tasks))}
+    `Create a short daily brief for @${req.user.username}.
+Energy: ${req.user.energy}
+Live tasks: ${JSON.stringify(tasks)}
 
 Schema:
 {
@@ -109,26 +534,28 @@ Schema:
   res.json(result);
 });
 
-app.post('/api/ai/nudge', async (req, res) => {
-  const { task, profile = {} } = req.body;
+app.post('/api/ai/nudge', auth, async (req, res) => {
+  const task = db.prepare('SELECT * FROM tasks WHERE id = ? AND owner_id = ?').get(req.body.taskId, req.user.id);
+  if (!task) return res.status(404).json({ error: 'Task not found.' });
+
   const fallback = {
     type: 'Tiny Start',
-    message: `Open ${task?.title || 'the task'} and do the first useful 5 minutes.`,
-    actions: ['Start 15-minute sprint', 'Break it down', 'Snooze safely'],
-    safeSnoozeMinutes: 25
+    message: `Open "${task.title}" and work for 10 minutes. Do not optimize yet.`,
+    safeSnoozeMinutes: 20,
+    friendHelp: task.can_ask_friend ? 'Ask a friend for review or a focus sprint if you are stuck.' : 'Friend support is off for this task.'
   };
 
   const result = await generateJson(
-    `Create one smart reminder nudge for this task.
-User profile: ${JSON.stringify(profile)}
+    `Create one simple smart reminder for this task.
+User energy: ${req.user.energy}
 Task: ${JSON.stringify(task)}
 
 Schema:
 {
-  "type": "Action Reminder | Reality Check | Tiny Start | Trade-Off | Mood-Aware",
+  "type": "Tiny Start | Reality Check | Trade-Off | Last Light",
   "message": "short direct nudge",
-  "actions": ["button label", "button label", "button label"],
-  "safeSnoozeMinutes": number
+  "safeSnoozeMinutes": number,
+  "friendHelp": "one sentence"
 }`,
     fallback
   );
@@ -136,27 +563,27 @@ Schema:
   res.json(result);
 });
 
-app.post('/api/ai/breakdown', async (req, res) => {
-  const { task } = req.body;
+app.post('/api/ai/breakdown', auth, async (req, res) => {
+  const task = db.prepare('SELECT * FROM tasks WHERE id = ? AND owner_id = ?').get(req.body.taskId, req.user.id);
+  if (!task) return res.status(404).json({ error: 'Task not found.' });
+
   const fallback = {
-    summary: 'This task is too large as one block. Split it into smaller wins.',
+    summary: 'Split this into three small moves.',
     steps: [
-      { title: 'Define the minimum version', minutes: 10 },
-      { title: 'Finish the main work', minutes: 35 },
-      { title: 'Review and submit', minutes: 15 }
+      { title: 'Start the file or workspace', minutes: 5 },
+      { title: 'Finish the minimum useful version', minutes: 25 },
+      { title: 'Review and send', minutes: 10 }
     ]
   };
 
   const result = await generateJson(
-    `Break this task into practical mini-steps. Avoid playful creature names.
+    `Break this task into small practical steps.
 Task: ${JSON.stringify(task)}
 
 Schema:
 {
   "summary": "one sentence",
-  "steps": [
-    { "title": "specific step", "minutes": number }
-  ]
+  "steps": [{ "title": "specific step", "minutes": number }]
 }`,
     fallback
   );
@@ -164,83 +591,30 @@ Schema:
   res.json(result);
 });
 
-app.post('/api/ai/last-light', async (req, res) => {
-  const { task, minutesLeft, profile = {} } = req.body;
+app.post('/api/ai/last-light', auth, async (req, res) => {
+  const task = db.prepare('SELECT * FROM tasks WHERE id = ? AND owner_id = ?').get(req.body.taskId, req.user.id);
+  if (!task) return res.status(404).json({ error: 'Task not found.' });
+
   const fallback = {
-    headline: 'Planning time is over. Finish the smallest acceptable version.',
+    headline: 'Planning time is over. Finish the minimum version.',
     moves: [
-      'Open the work and remove every non-essential part.',
-      'Complete the minimum version that can be submitted.',
-      'Submit first, polish only if time remains.'
+      'Open the task and remove non-essential work.',
+      'Complete the smallest version that can count as done.',
+      'Submit or send it before polishing.'
     ],
-    drop: 'Anything not required for submission.'
+    askFriend: task.can_ask_friend ? 'Send a flare for review or a reminder check-in.' : 'Friend support is off, so keep this solo and simple.'
   };
 
   const result = await generateJson(
-    `The task is close to deadline. Create emergency triage.
-Minutes left: ${minutesLeft}
-User profile: ${JSON.stringify(profile)}
+    `Create Last Light triage for this task.
 Task: ${JSON.stringify(task)}
+Energy: ${req.user.energy}
 
 Schema:
 {
   "headline": "short urgent sentence",
   "moves": ["move 1", "move 2", "move 3"],
-  "drop": "what to ignore"
-}`,
-    fallback
-  );
-
-  res.json(result);
-});
-
-app.post('/api/ai/replan', async (req, res) => {
-  const { tasks = [], disruption, profile = {} } = req.body;
-  const fallback = {
-    headline: 'Plan adjusted. Protect the urgent task and move flexible work.',
-    keep: ['Finish the soonest deadline first.'],
-    move: ['Move lower-importance work to tomorrow.'],
-    askForHelp: ['Send a flare for review or accountability if you are stuck.']
-  };
-
-  const result = await generateJson(
-    `Replan the user's task board because life happened.
-Disruption: ${disruption}
-User profile: ${JSON.stringify(profile)}
-Tasks: ${JSON.stringify(summarizeTasks(tasks))}
-
-Schema:
-{
-  "headline": "one sentence",
-  "keep": ["task/action to keep today"],
-  "move": ["task/action to move or reduce"],
-  "askForHelp": ["specific thing a friend could help with"]
-}`,
-    fallback
-  );
-
-  res.json(result);
-});
-
-app.post('/api/ai/victory', async (req, res) => {
-  const { task, actualMinutes, profile = {} } = req.body;
-  const fallback = {
-    headline: 'Task saved.',
-    insight: 'Notice how long this actually took. Use that as your next estimate.',
-    nextTime: 'Add one buffer block if the task involved writing, review, or coordination.'
-  };
-
-  const result = await generateJson(
-    `Create a completion reflection that helps the user learn their work pattern.
-User profile: ${JSON.stringify(profile)}
-Task: ${JSON.stringify(task)}
-Actual minutes: ${actualMinutes}
-
-Schema:
-{
-  "headline": "short celebratory line",
-  "insight": "useful observation",
-  "nextTime": "one recommendation for future planning"
+  "askFriend": "one sentence"
 }`,
     fallback
   );
@@ -258,4 +632,5 @@ app.get('*', (_req, res) => {
 
 app.listen(port, () => {
   console.log(`Flicker server running on http://localhost:${port}`);
+  console.log(`SQLite database: ${dbPath}`);
 });

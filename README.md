@@ -86,24 +86,14 @@ npm start
 
 Production app: `http://localhost:8080`
 
-## Push To GitHub
+## Demo Highlights
 
-```bash
-git init
-git add .
-git commit -m "Build Flicker deadline rescue app"
-git branch -M main
-git remote add origin https://github.com/YOUR_USERNAME/flicker.git
-git push -u origin main
-```
-
-For this update after the first build:
-
-```bash
-git add .
-git commit -m "Add shared flare tasks and clearer guidance"
-git push
-```
+- Add a task with a deadline and effort estimate.
+- Use Daily Signal to get an AI-generated plan for the day.
+- Use Smart Nudge, Break Down, and Last Light to turn reminders into action.
+- Add a friend by username and send a Flare.
+- Accept the Flare from a second account and complete the shared task.
+- Show the task moving from Live to Finished for both users.
 
 ## Google AI Studio Submission Notes
 

@@ -135,6 +135,7 @@ function App() {
   const [brief, setBrief] = useState(null);
   const [loading, setLoading] = useState('');
   const [error, setError] = useState('');
+  const [guideOpen, setGuideOpen] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(canNotify() && Notification.permission === 'granted');
   const notifiedRef = useRef(new Set());
   const dashboardReadyRef = useRef(false);
@@ -419,6 +420,7 @@ function App() {
   return (
     <main className={lastLight ? 'app alert' : 'app'}>
       {!dashboard.user.tutorialSeen && <Tutorial onDone={() => patchProfile({ tutorialSeen: true })} />}
+      {guideOpen && <GuideModal onClose={() => setGuideOpen(false)} />}
 
       <header className="topbar">
         <div>
@@ -427,6 +429,7 @@ function App() {
           <p>Welcome, @{dashboard.user.username}. Keep live work simple. Move done work out of the way.</p>
         </div>
         <div className="top-actions">
+          <button className="help-chip" onClick={() => setGuideOpen(true)} title="Open guide">?</button>
           <label>
             Energy
             <select value={dashboard.user.energy} onChange={(event) => patchProfile({ energy: event.target.value })}>
@@ -456,6 +459,25 @@ function App() {
 
       {error && <div className="error">{error}</div>}
       {loading && <div className="loading">{loading}</div>}
+
+      <section className="pulse-row">
+        <div className="pulse-card">
+          <span>Live</span>
+          <strong>{liveTasks.length}</strong>
+        </div>
+        <div className="pulse-card hot">
+          <span>Urgent</span>
+          <strong>{liveTasks.filter((task) => task.heat.level >= 4).length}</strong>
+        </div>
+        <div className="pulse-card">
+          <span>Shared</span>
+          <strong>{liveTasks.filter((task) => task.role === 'helper').length}</strong>
+        </div>
+        <div className="pulse-card">
+          <span>Habits</span>
+          <strong>{dashboard.habits?.length || 0}</strong>
+        </div>
+      </section>
 
       <nav className="tabs">
         {[
@@ -522,7 +544,6 @@ function App() {
         </section>
 
         <aside className="side">
-          <GuideCard />
           <AiPanel panel={panel} />
           <Activity activity={dashboard.activity} />
         </aside>
@@ -1030,20 +1051,29 @@ function AiPanel({ panel }) {
   );
 }
 
-function GuideCard() {
+function GuideModal({ onClose }) {
   return (
-    <section className="card guide">
-      <p className="eyebrow">Quick guide</p>
-      <h3>What the buttons mean</h3>
-      <p><strong>Daily Signal:</strong> a simple plan for your current board.</p>
-      <p><strong>Smart Nudge:</strong> one small action to start or recover a task.</p>
-      <p><strong>Break Down:</strong> splits a task into short steps.</p>
-      <p><strong>Last Light:</strong> emergency mode when time is tight.</p>
-      <p><strong>Planner:</strong> ranks tasks and builds calendar-ready focus blocks.</p>
-      <p><strong>Habits:</strong> tracks repeatable actions like study, applications, or practice.</p>
-      <p><strong>Notifications:</strong> alerts for urgent tasks and reminder check-ins while Flicker is open.</p>
-      <p><strong>Send a Flare:</strong> ask a friend to volunteer for focus, review, reminders, or an allowed shared subtask.</p>
-    </section>
+    <div className="modal-backdrop">
+      <section className="modal guide-modal">
+        <div className="modal-head">
+          <div>
+            <p className="eyebrow">Quick guide</p>
+            <h2>What everything does</h2>
+          </div>
+          <button className="secondary" onClick={onClose}>Close</button>
+        </div>
+        <div className="guide-grid">
+          <p><strong>Daily Signal</strong><span>A simple plan for your current board.</span></p>
+          <p><strong>Smart Nudge</strong><span>One small action to start or recover a task.</span></p>
+          <p><strong>Break Down</strong><span>Splits a task into short steps.</span></p>
+          <p><strong>Last Light</strong><span>Emergency mode when time is tight.</span></p>
+          <p><strong>Planner</strong><span>Ranks tasks and builds calendar-ready focus blocks.</span></p>
+          <p><strong>Habits</strong><span>Tracks repeatable actions like study or applications.</span></p>
+          <p><strong>Notifications</strong><span>Alerts for urgent tasks and reminder check-ins while Flicker is open.</span></p>
+          <p><strong>Send a Flare</strong><span>Ask a friend to volunteer for focus, review, reminders, or an allowed shared subtask.</span></p>
+        </div>
+      </section>
+    </div>
   );
 }
 

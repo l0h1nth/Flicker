@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
 
@@ -51,6 +51,82 @@ function normalizeTask(task) {
   };
 }
 
+function canNotify() {
+  return typeof window !== 'undefined' && 'Notification' in window;
+}
+
+function showBrowserNotification(title, body) {
+  if (!canNotify() || Notification.permission !== 'granted') return;
+  new Notification(title, {
+    body,
+    tag: `flicker-${title}-${body}`,
+    renotify: false
+  });
+}
+
+function toLocalInputValue(isoString) {
+  const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) return soon(24);
+  const offset = date.getTimezoneOffset();
+  return new Date(date.getTime() - offset * 60 * 1000).toISOString().slice(0, 16);
+}
+
+function downloadIcs(blocks, startLabel = '') {
+  const start = new Date();
+  let cursor = new Date(start);
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+  const events = blocks.map((block, index) => {
+    const eventStart = new Date(cursor);
+    cursor = new Date(cursor.getTime() + Number(block.minutes || 15) * 60000);
+    const format = (date) => date.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+    return [
+      'BEGIN:VEVENT',
+      `UID:flicker-${Date.now()}-${index}@local`,
+      `DTSTAMP:${stamp}`,
+      `DTSTART:${format(eventStart)}`,
+      `DTEND:${format(cursor)}`,
+      `SUMMARY:${String(block.title || 'Flicker block').replace(/\n/g, ' ')}`,
+      `DESCRIPTION:${String(block.action || startLabel || 'Flicker schedule block').replace(/\n/g, ' ')}`,
+      'END:VEVENT'
+    ].join('\r\n');
+  });
+
+  const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Flicker//Deadline Rescue//EN', ...events, 'END:VCALENDAR'].join('\r\n');
+  const url = URL.createObjectURL(new Blob([ics], { type: 'text/calendar;charset=utf-8' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'flicker-schedule.ics';
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function downloadTaskIcs(task) {
+  const end = new Date(task.deadline);
+  const start = new Date(end.getTime() - Number(task.effortMinutes || 30) * 60000);
+  const format = (date) => date.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+  const stamp = format(new Date());
+  const ics = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//Flicker//Deadline Rescue//EN',
+    'BEGIN:VEVENT',
+    `UID:flicker-task-${task.id}@local`,
+    `DTSTAMP:${stamp}`,
+    `DTSTART:${format(start)}`,
+    `DTEND:${format(end)}`,
+    `SUMMARY:${String(task.title || 'Flicker task').replace(/\n/g, ' ')}`,
+    `DESCRIPTION:${String(task.notes || 'Deadline protected by Flicker').replace(/\n/g, ' ')}`,
+    'END:VEVENT',
+    'END:VCALENDAR'
+  ].join('\r\n');
+  const url = URL.createObjectURL(new Blob([ics], { type: 'text/calendar;charset=utf-8' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${String(task.title || 'flicker-task').toLowerCase().replace(/[^a-z0-9]+/g, '-')}.ics`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 function App() {
   const [token, setToken] = useState(localStorage.getItem(tokenKey) || '');
   const [dashboard, setDashboard] = useState(null);
@@ -59,6 +135,9 @@ function App() {
   const [brief, setBrief] = useState(null);
   const [loading, setLoading] = useState('');
   const [error, setError] = useState('');
+  const [notificationsEnabled, setNotificationsEnabled] = useState(canNotify() && Notification.permission === 'granted');
+  const notifiedRef = useRef(new Set());
+  const dashboardReadyRef = useRef(false);
 
   const liveTasks = useMemo(
     () => (dashboard?.liveTasks || []).map(normalizeTask).sort((a, b) => b.heat.level - a.heat.level),
@@ -105,8 +184,48 @@ function App() {
   async function refresh(silent = false) {
     await run('Loading Flicker', async () => {
       const data = await api('/api/dashboard');
+      maybeNotify(data);
       setDashboard(data);
     }, silent);
+  }
+
+  function maybeNotify(data) {
+    if (!dashboardReadyRef.current) {
+      dashboardReadyRef.current = true;
+      return;
+    }
+    if (!canNotify() || Notification.permission !== 'granted') return;
+
+    for (const request of data.incomingHelpRequests || []) {
+      const key = `flare-${request.id}-${request.status}`;
+      if (request.status === 'pending' && !notifiedRef.current.has(key)) {
+        notifiedRef.current.add(key);
+        showBrowserNotification(
+          request.kind === 'Reminder check-in' ? 'Reminder check-in request' : 'New Flare request',
+          `@${request.ownerUsername} needs ${request.kind} for "${request.taskTitle}".`
+        );
+      }
+    }
+
+    for (const task of (data.liveTasks || []).map(normalizeTask)) {
+      const key = `urgent-${task.id}`;
+      if (task.heat.minutesLeft >= 0 && task.heat.minutesLeft <= 120 && !notifiedRef.current.has(key)) {
+        notifiedRef.current.add(key);
+        showBrowserNotification('Task needs action', `"${task.title}" has ${timeLeft(task.heat.minutesLeft)}.`);
+      }
+    }
+  }
+
+  async function enableNotifications() {
+    if (!canNotify()) {
+      setError('Browser notifications are not supported here.');
+      return;
+    }
+    const permission = await Notification.requestPermission();
+    setNotificationsEnabled(permission === 'granted');
+    if (permission === 'granted') {
+      showBrowserNotification('Flicker notifications enabled', 'You will get alerts for urgent tasks and reminder check-ins while Flicker is open.');
+    }
   }
 
   async function login(mode, username, password) {
@@ -192,6 +311,74 @@ function App() {
     });
   }
 
+  async function planDay(availableMinutes) {
+    await run('Planning your day', async () => {
+      const data = await api('/api/ai/plan-day', { method: 'POST', body: { availableMinutes } });
+      setPanel({
+        title: data.summary,
+        body: data.note,
+        lines: [
+          ...(data.doFirst || []).map((item) => `${item.title}: ${item.nextAction} (${item.why})`),
+          ...(data.askFriend || []),
+          ...(data.delay || []).map((item) => `Delay: ${item}`)
+        ],
+        note: data.note,
+        offline: data.offline,
+        modelUsed: data.modelUsed
+      });
+      return data;
+    });
+  }
+
+  async function scheduleDay(availableMinutes, startTime) {
+    return run('Building schedule', async () => {
+      const data = await api('/api/ai/schedule', { method: 'POST', body: { availableMinutes, startTime } });
+      setPanel({
+        title: data.headline,
+        body: data.warning,
+        lines: (data.blocks || []).map((block) => `${block.title} · ${block.minutes} min · ${block.action}`),
+        note: data.note,
+        offline: data.offline,
+        modelUsed: data.modelUsed
+      });
+      return data;
+    });
+  }
+
+  async function parseVoice(transcript) {
+    return run('Parsing voice task', async () => {
+      return api('/api/ai/parse-voice', { method: 'POST', body: { transcript } });
+    });
+  }
+
+  async function createHabit(habit) {
+    await run('Adding habit', async () => {
+      const data = await api('/api/habits', { method: 'POST', body: habit });
+      setDashboard(data);
+    });
+  }
+
+  async function checkHabit(habitId) {
+    await run('Checking in habit', async () => {
+      const data = await api(`/api/habits/${habitId}/check-in`, { method: 'POST' });
+      setDashboard(data);
+    });
+  }
+
+  async function resetHabit(habitId) {
+    await run('Resetting habit', async () => {
+      const data = await api(`/api/habits/${habitId}/reset`, { method: 'POST' });
+      setDashboard(data);
+    });
+  }
+
+  async function deleteHabit(habitId) {
+    await run('Removing habit', async () => {
+      const data = await api(`/api/habits/${habitId}`, { method: 'DELETE' });
+      setDashboard(data);
+    });
+  }
+
   async function sendFriendRequest(username) {
     await run('Sending friend request', async () => {
       const data = await api('/api/friends/request', { method: 'POST', body: { username } });
@@ -249,6 +436,9 @@ function App() {
             </select>
           </label>
           <button onClick={aiBrief}>Daily Signal</button>
+          <button className="secondary" onClick={enableNotifications}>
+            {notificationsEnabled ? 'Notifications on' : 'Enable notifications'}
+          </button>
           <span className={dashboard.ai?.configured ? 'ai-status live' : 'ai-status'}>
             {dashboard.ai?.configured ? 'Gemini on' : 'Fallback AI'}
           </span>
@@ -270,6 +460,8 @@ function App() {
       <nav className="tabs">
         {[
           ['live', `Live (${liveTasks.length})`],
+          ['planner', 'Planner'],
+          ['habits', `Habits (${dashboard.habits?.length || 0})`],
           ['finished', `Finished (${completedTasks.length})`],
           ['crew', `Crew (${dashboard.friends.length})`],
           ['requests', `Requests (${dashboard.incomingHelpRequests.filter((r) => r.status === 'pending').length})`]
@@ -292,6 +484,23 @@ function App() {
               completeTask={completeTask}
               aiAction={aiAction}
               sendFlare={sendFlare}
+              parseVoice={parseVoice}
+            />
+          )}
+          {tab === 'planner' && (
+            <PlannerPage
+              tasks={liveTasks}
+              planDay={planDay}
+              scheduleDay={scheduleDay}
+            />
+          )}
+          {tab === 'habits' && (
+            <HabitsPage
+              habits={dashboard.habits || []}
+              createHabit={createHabit}
+              checkHabit={checkHabit}
+              resetHabit={resetHabit}
+              deleteHabit={deleteHabit}
             />
           )}
           {tab === 'finished' && <FinishedPage tasks={completedTasks} />}
@@ -364,6 +573,8 @@ function Tutorial({ onDone }) {
           <li><strong>Finished</strong> keeps completed tasks away from today’s noise.</li>
           <li><strong>Crew</strong> lets you add friends by username.</li>
           <li><strong>Requests</strong> is where friends accept or reject your flares.</li>
+          <li><strong>Planner</strong> creates priorities, schedule blocks, and calendar files.</li>
+          <li><strong>Habits</strong> tracks repeatable goals that prevent deadline panic.</li>
           <li><strong>Smart Nudge</strong> gives one next action. <strong>Break Down</strong> splits a task. <strong>Last Light</strong> gives emergency steps.</li>
         </ol>
         <button onClick={onDone}>Got it</button>
@@ -372,7 +583,7 @@ function Tutorial({ onDone }) {
   );
 }
 
-function LivePage({ tasks, friends, brief, createTask, updateTask, completeTask, aiAction, sendFlare }) {
+function LivePage({ tasks, friends, brief, createTask, updateTask, completeTask, aiAction, sendFlare, parseVoice }) {
   return (
     <div className="stack">
       <section className="card signal">
@@ -382,7 +593,7 @@ function LivePage({ tasks, friends, brief, createTask, updateTask, completeTask,
           {brief?.firstMove && <p>{brief.firstMove}</p>}
         </div>
       </section>
-      <TaskForm createTask={createTask} />
+      <TaskForm createTask={createTask} parseVoice={parseVoice} />
       <section className="stack">
         {tasks.length === 0 ? (
           <Empty title="No live tasks" body="Add one task, then use Smart Nudge or send a Flare if you get stuck." />
@@ -404,7 +615,7 @@ function LivePage({ tasks, friends, brief, createTask, updateTask, completeTask,
   );
 }
 
-function TaskForm({ createTask }) {
+function TaskForm({ createTask, parseVoice }) {
   const [task, setTask] = useState({
     title: '',
     deadline: soon(24),
@@ -414,6 +625,7 @@ function TaskForm({ createTask }) {
     notes: '',
     canAskFriend: true
   });
+  const [voiceStatus, setVoiceStatus] = useState('');
 
   function submit(event) {
     event.preventDefault();
@@ -421,9 +633,45 @@ function TaskForm({ createTask }) {
     setTask({ ...task, title: '', notes: '' });
   }
 
+  function startVoice() {
+    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!Recognition) {
+      setVoiceStatus('Voice input is not supported in this browser.');
+      return;
+    }
+    const recognition = new Recognition();
+    recognition.lang = 'en-US';
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+    setVoiceStatus('Listening...');
+    recognition.onresult = async (event) => {
+      const transcript = event.results?.[0]?.[0]?.transcript || '';
+      setVoiceStatus(`Heard: ${transcript}`);
+      const parsed = await parseVoice(transcript);
+      if (parsed) {
+        setTask({
+          title: parsed.title || transcript,
+          deadline: toLocalInputValue(parsed.deadline),
+          effortMinutes: parsed.effortMinutes || 30,
+          importance: parsed.importance || 3,
+          category: parsed.category || 'Voice',
+          notes: parsed.notes || transcript,
+          canAskFriend: true
+        });
+        setVoiceStatus('Voice task filled. Review and add it.');
+      }
+    };
+    recognition.onerror = () => setVoiceStatus('Could not capture voice. Try typing it.');
+    recognition.start();
+  }
+
   return (
     <form className="card form" onSubmit={submit}>
       <p className="eyebrow">Add live task</p>
+      <div className="button-row compact-row">
+        <button type="button" className="secondary" onClick={startVoice}>Speak task</button>
+        {voiceStatus && <span className="inline-note">{voiceStatus}</span>}
+      </div>
       <input value={task.title} onChange={(event) => setTask({ ...task, title: event.target.value })} placeholder="Task name" />
       <div className="form-grid">
         <label>
@@ -486,6 +734,7 @@ function TaskCard({ task, friends, updateTask, completeTask, aiAction, sendFlare
         <button className="secondary" onClick={() => aiAction('nudge', task)}>Smart Nudge</button>
         <button className="secondary" onClick={() => aiAction('breakdown', task)}>Break Down</button>
         <button className="secondary danger-button" onClick={() => aiAction('last', task)}>Last Light</button>
+        <button className="secondary" onClick={() => downloadTaskIcs(task)}>Calendar</button>
       </div>
       {task.role !== 'helper' && task.canAskFriend && (
         <div className="flare-box">
@@ -523,6 +772,137 @@ function TaskCard({ task, friends, updateTask, completeTask, aiAction, sendFlare
         <p className="preview">You accepted this Flare. Updating progress or completing it will update both dashboards.</p>
       )}
     </article>
+  );
+}
+
+function PlannerPage({ tasks, planDay, scheduleDay }) {
+  const [availableMinutes, setAvailableMinutes] = useState(120);
+  const [startTime, setStartTime] = useState('now');
+  const [plan, setPlan] = useState(null);
+  const [schedule, setSchedule] = useState(null);
+
+  async function runPlan() {
+    const data = await planDay(availableMinutes);
+    if (data) setPlan(data);
+  }
+
+  async function runSchedule() {
+    const data = await scheduleDay(availableMinutes, startTime);
+    if (data) setSchedule(data);
+  }
+
+  return (
+    <div className="stack">
+      <section className="card">
+        <p className="eyebrow">AI priority planner</p>
+        <h2>Plan the next useful block</h2>
+        <div className="form-grid compact">
+          <label>
+            Available minutes
+            <input type="number" min="15" step="15" value={availableMinutes} onChange={(event) => setAvailableMinutes(event.target.value)} />
+          </label>
+          <label>
+            Start label
+            <input value={startTime} onChange={(event) => setStartTime(event.target.value)} placeholder="now, 4pm, after lunch" />
+          </label>
+        </div>
+        <div className="button-row">
+          <button onClick={runPlan}>Plan My Day</button>
+          <button className="secondary" onClick={runSchedule}>Build Schedule</button>
+          <button className="secondary" disabled={!schedule?.blocks?.length} onClick={() => downloadIcs(schedule.blocks, startTime)}>Download Calendar</button>
+        </div>
+      </section>
+
+      {plan && (
+        <section className="card">
+          <p className="eyebrow">Priority plan</p>
+          <h3>{plan.summary}</h3>
+          {(plan.doFirst || []).map((item) => (
+            <div className="plan-item" key={`${item.taskId}-${item.title}`}>
+              <strong>{item.title}</strong>
+              <p>{item.nextAction}</p>
+              <p className="muted">{item.why}</p>
+            </div>
+          ))}
+          {!!plan.askFriend?.length && <p className="eyebrow">Ask friend</p>}
+          {plan.askFriend?.map((item) => <p className="muted" key={item}>{item}</p>)}
+          {!!plan.delay?.length && <p className="eyebrow">Delay</p>}
+          {plan.delay?.map((item) => <p className="muted" key={item}>{item}</p>)}
+        </section>
+      )}
+
+      {schedule && (
+        <section className="card">
+          <p className="eyebrow">Schedule blocks</p>
+          <h3>{schedule.headline}</h3>
+          {(schedule.blocks || []).map((block, index) => (
+            <div className="schedule-block" key={`${block.title}-${index}`}>
+              <strong>{block.minutes} min · {block.title}</strong>
+              <p>{block.action}</p>
+            </div>
+          ))}
+          {schedule.warning && <p className="preview">{schedule.warning}</p>}
+        </section>
+      )}
+
+      {!tasks.length && <Empty title="No tasks to plan" body="Add live tasks first, then come back for prioritization and schedule blocks." />}
+    </div>
+  );
+}
+
+function HabitsPage({ habits, createHabit, checkHabit, resetHabit, deleteHabit }) {
+  const [draft, setDraft] = useState({ title: '', targetCount: 1, period: 'daily' });
+
+  function submit(event) {
+    event.preventDefault();
+    createHabit(draft);
+    setDraft({ title: '', targetCount: 1, period: 'daily' });
+  }
+
+  return (
+    <div className="stack">
+      <form className="card form" onSubmit={submit}>
+        <p className="eyebrow">Goal and habit tracking</p>
+        <h2>Build the habit before the deadline</h2>
+        <div className="form-grid compact">
+          <input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="Study 30 minutes, apply to jobs..." />
+          <select value={draft.period} onChange={(event) => setDraft({ ...draft, period: event.target.value })}>
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+          </select>
+        </div>
+        <label>
+          Target check-ins
+          <input type="number" min="1" value={draft.targetCount} onChange={(event) => setDraft({ ...draft, targetCount: event.target.value })} />
+        </label>
+        <button type="submit">Add habit</button>
+      </form>
+
+      {habits.length === 0 ? (
+        <Empty title="No habits yet" body="Add one repeatable action that prevents future panic." />
+      ) : (
+        habits.map((habit) => {
+          const percent = Math.min(100, Math.round((Number(habit.currentCount || 0) / Number(habit.targetCount || 1)) * 100));
+          return (
+            <article className="card habit" key={habit.id}>
+              <div className="task-head">
+                <div>
+                  <span className="heat">{habit.period}</span>
+                  <h3>{habit.title}</h3>
+                  <p>{habit.currentCount}/{habit.targetCount} check-ins · streak {habit.streak}</p>
+                </div>
+                <button onClick={() => checkHabit(habit.id)}>Check in</button>
+              </div>
+              <div className="progress"><span style={{ width: `${percent}%` }} /></div>
+              <div className="button-row">
+                <button className="secondary" onClick={() => resetHabit(habit.id)}>Reset</button>
+                <button className="secondary danger-button" onClick={() => deleteHabit(habit.id)}>Archive</button>
+              </div>
+            </article>
+          );
+        })
+      )}
+    </div>
   );
 }
 
@@ -659,6 +1039,9 @@ function GuideCard() {
       <p><strong>Smart Nudge:</strong> one small action to start or recover a task.</p>
       <p><strong>Break Down:</strong> splits a task into short steps.</p>
       <p><strong>Last Light:</strong> emergency mode when time is tight.</p>
+      <p><strong>Planner:</strong> ranks tasks and builds calendar-ready focus blocks.</p>
+      <p><strong>Habits:</strong> tracks repeatable actions like study, applications, or practice.</p>
+      <p><strong>Notifications:</strong> alerts for urgent tasks and reminder check-ins while Flicker is open.</p>
       <p><strong>Send a Flare:</strong> ask a friend to volunteer for focus, review, reminders, or an allowed shared subtask.</p>
     </section>
   );

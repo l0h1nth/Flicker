@@ -97,6 +97,21 @@ db.exec(`
     created_at TEXT NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
+
+  CREATE TABLE IF NOT EXISTS habits (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    target_count INTEGER DEFAULT 1,
+    current_count INTEGER DEFAULT 0,
+    period TEXT DEFAULT 'daily',
+    streak INTEGER DEFAULT 0,
+    last_completed_at TEXT,
+    status TEXT DEFAULT 'active',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
 `);
 
 for (const migration of [
@@ -385,6 +400,82 @@ function lastLightFallback(task) {
   };
 }
 
+function planDayFallback(tasks, user) {
+  const ordered = [...tasks].sort((a, b) => {
+    const urgency = new Date(a.deadline) - new Date(b.deadline);
+    if (urgency !== 0) return urgency;
+    return Number(b.importance || 3) - Number(a.importance || 3);
+  });
+  const top = ordered.slice(0, 3);
+  return {
+    summary: top.length ? `Protect ${top.length} task${top.length === 1 ? '' : 's'} first.` : 'Your board is clear.',
+    doFirst: top.map((task) => ({
+      taskId: task.id,
+      title: task.title,
+      why: `${formatWindow(minutesUntil(task.deadline))}, importance ${task.importance}.`,
+      nextAction: `Work on "${task.title}" for 15 minutes.`
+    })),
+    delay: ordered.slice(3).map((task) => task.title),
+    askFriend: ordered
+      .filter((task) => task.can_ask_friend && task.role !== 'helper')
+      .slice(0, 2)
+      .map((task) => `Send a Flare for "${task.title}" if review or accountability would unblock it.`),
+    note: user.energy === 'low' ? 'Low energy detected. Keep the first block small.' : 'Use one focused block before switching tasks.'
+  };
+}
+
+function scheduleFallback(tasks, availableMinutes = 120, startTime = '') {
+  const ordered = [...tasks].sort((a, b) => new Date(a.deadline) - new Date(b.deadline));
+  let remaining = Number(availableMinutes || 120);
+  const blocks = [];
+
+  for (const task of ordered) {
+    if (remaining <= 0) break;
+    const needed = Number(task.effort_minutes || 30) * (1 - Number(task.progress || 0) / 100);
+    const minutes = Math.min(Math.max(15, needed), remaining, 45);
+    blocks.push({
+      title: task.title,
+      minutes: Math.round(minutes),
+      action: `Make visible progress on "${task.title}".`
+    });
+    remaining -= minutes;
+    if (remaining >= 10) {
+      blocks.push({ title: 'Reset break', minutes: 5, action: 'Stand up, breathe, and return.' });
+      remaining -= 5;
+    }
+  }
+
+  return {
+    headline: `A ${availableMinutes}-minute plan${startTime ? ` starting ${startTime}` : ''}.`,
+    blocks: blocks.length ? blocks : [{ title: 'Add a task', minutes: 10, action: 'Capture one deadline you need to protect.' }],
+    warning: remaining < 0 ? 'This schedule is overloaded.' : 'Keep blocks short and update progress after each one.'
+  };
+}
+
+function parseVoiceFallback(transcript) {
+  const text = String(transcript || '').trim();
+  const lower = text.toLowerCase();
+  const date = new Date();
+  if (lower.includes('tomorrow')) date.setDate(date.getDate() + 1);
+  if (lower.includes('today')) date.setDate(date.getDate());
+  date.setHours(lower.includes('morning') ? 10 : lower.includes('night') ? 21 : 18, 0, 0, 0);
+
+  const minutesMatch = lower.match(/(\d+)\s*(minute|min|hour|hr|hours)/);
+  let effortMinutes = 30;
+  if (minutesMatch) {
+    effortMinutes = Number(minutesMatch[1]) * (minutesMatch[2].startsWith('hour') || minutesMatch[2] === 'hr' ? 60 : 1);
+  }
+
+  return {
+    title: text.replace(/\b(due|tomorrow|today|morning|night|takes?|hours?|minutes?|mins?|hrs?)\b/gi, '').replace(/\s+/g, ' ').trim() || text || 'Voice task',
+    deadline: date.toISOString(),
+    effortMinutes,
+    importance: lower.includes('important') || lower.includes('urgent') ? 5 : 3,
+    category: 'Voice',
+    notes: text
+  };
+}
+
 function dashboard(userId) {
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
   const liveTasks = [...tasksFor(userId, 'active'), ...sharedTasksFor(userId, 'active')]
@@ -454,6 +545,23 @@ function dashboard(userId) {
     LIMIT 12
   `).all(userId);
 
+  const habits = db.prepare(`
+    SELECT
+      id,
+      title,
+      target_count AS targetCount,
+      current_count AS currentCount,
+      period,
+      streak,
+      last_completed_at AS lastCompletedAt,
+      status,
+      created_at AS createdAt,
+      updated_at AS updatedAt
+    FROM habits
+    WHERE user_id = ? AND status = 'active'
+    ORDER BY datetime(created_at) DESC
+  `).all(userId);
+
   return {
     user: userView(user),
     ai: {
@@ -467,6 +575,7 @@ function dashboard(userId) {
     outgoingFriendRequests,
     incomingHelpRequests,
     outgoingHelpRequests,
+    habits,
     activity
   };
 }
@@ -598,6 +707,68 @@ app.post('/api/tasks/:taskId/complete', auth, (req, res) => {
   } else {
     addActivity(req.user.id, `Completed "${task.title}". Moved to Finished.`);
   }
+  res.json(dashboard(req.user.id));
+});
+
+app.post('/api/habits', auth, (req, res) => {
+  const title = String(req.body.title || '').trim();
+  if (!title) return res.status(400).json({ error: 'Habit title is required.' });
+
+  db.prepare(`
+    INSERT INTO habits (
+      id, user_id, title, target_count, current_count, period, streak, status, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, 0, ?, 0, 'active', ?, ?)
+  `).run(
+    id(),
+    req.user.id,
+    title,
+    Math.max(1, Number(req.body.targetCount || 1)),
+    ['daily', 'weekly'].includes(req.body.period) ? req.body.period : 'daily',
+    now(),
+    now()
+  );
+  addActivity(req.user.id, `Added habit "${title}".`);
+  res.json(dashboard(req.user.id));
+});
+
+app.post('/api/habits/:habitId/check-in', auth, (req, res) => {
+  const habit = db.prepare('SELECT * FROM habits WHERE id = ? AND user_id = ? AND status = ?')
+    .get(req.params.habitId, req.user.id, 'active');
+  if (!habit) return res.status(404).json({ error: 'Habit not found.' });
+
+  const nextCount = Math.min(Number(habit.current_count || 0) + 1, Number(habit.target_count || 1));
+  const completedNow = nextCount >= Number(habit.target_count || 1);
+  db.prepare(`
+    UPDATE habits
+    SET current_count = ?, streak = ?, last_completed_at = ?, updated_at = ?
+    WHERE id = ? AND user_id = ?
+  `).run(
+    nextCount,
+    completedNow ? Number(habit.streak || 0) + 1 : Number(habit.streak || 0),
+    completedNow ? now() : habit.last_completed_at,
+    now(),
+    req.params.habitId,
+    req.user.id
+  );
+  addActivity(req.user.id, completedNow ? `Hit habit goal "${habit.title}".` : `Checked in habit "${habit.title}".`);
+  res.json(dashboard(req.user.id));
+});
+
+app.post('/api/habits/:habitId/reset', auth, (req, res) => {
+  const habit = db.prepare('SELECT * FROM habits WHERE id = ? AND user_id = ? AND status = ?')
+    .get(req.params.habitId, req.user.id, 'active');
+  if (!habit) return res.status(404).json({ error: 'Habit not found.' });
+
+  db.prepare('UPDATE habits SET current_count = 0, updated_at = ? WHERE id = ? AND user_id = ?')
+    .run(now(), req.params.habitId, req.user.id);
+  addActivity(req.user.id, `Reset habit "${habit.title}".`);
+  res.json(dashboard(req.user.id));
+});
+
+app.delete('/api/habits/:habitId', auth, (req, res) => {
+  db.prepare('UPDATE habits SET status = ?, updated_at = ? WHERE id = ? AND user_id = ?')
+    .run('archived', now(), req.params.habitId, req.user.id);
   res.json(dashboard(req.user.id));
 });
 
@@ -763,6 +934,85 @@ Schema:
   "headline": "short urgent sentence",
   "moves": ["move 1", "move 2", "move 3"],
   "askFriend": "one sentence"
+}`,
+    fallback
+  );
+
+  res.json(result);
+});
+
+app.post('/api/ai/plan-day', auth, async (req, res) => {
+  const tasks = [...tasksFor(req.user.id, 'active'), ...sharedTasksFor(req.user.id, 'active')];
+  const fallback = planDayFallback(tasks, req.user);
+
+  const result = await generateJson(
+    `Prioritize this user's live task board. Be decisive and explain briefly.
+User: @${req.user.username}
+Energy: ${req.user.energy}
+Available minutes today: ${Number(req.body.availableMinutes || 120)}
+Tasks: ${JSON.stringify(tasks)}
+
+Schema:
+{
+  "summary": "one sentence",
+  "doFirst": [
+    { "taskId": "task id", "title": "task title", "why": "short reason", "nextAction": "specific next action" }
+  ],
+  "delay": ["task title to delay"],
+  "askFriend": ["specific friend-help suggestion"],
+  "note": "one coaching note"
+}`,
+    fallback
+  );
+
+  res.json(result);
+});
+
+app.post('/api/ai/schedule', auth, async (req, res) => {
+  const tasks = [...tasksFor(req.user.id, 'active'), ...sharedTasksFor(req.user.id, 'active')];
+  const availableMinutes = Number(req.body.availableMinutes || 120);
+  const startTime = String(req.body.startTime || '');
+  const fallback = scheduleFallback(tasks, availableMinutes, startTime);
+
+  const result = await generateJson(
+    `Create a realistic time-block schedule. Keep blocks short and action-oriented.
+Available minutes: ${availableMinutes}
+Start time label: ${startTime}
+User energy: ${req.user.energy}
+Tasks: ${JSON.stringify(tasks)}
+
+Schema:
+{
+  "headline": "one sentence",
+  "blocks": [
+    { "title": "task or break title", "minutes": number, "action": "what to do during this block" }
+  ],
+  "warning": "one sentence if schedule is risky, otherwise encouragement"
+}`,
+    fallback
+  );
+
+  res.json(result);
+});
+
+app.post('/api/ai/parse-voice', auth, async (req, res) => {
+  const transcript = String(req.body.transcript || '').trim();
+  if (!transcript) return res.status(400).json({ error: 'Transcript is required.' });
+
+  const fallback = parseVoiceFallback(transcript);
+  const result = await generateJson(
+    `Parse this spoken task into task form fields. If date/time is vague, choose a reasonable upcoming deadline.
+Current ISO time: ${now()}
+Transcript: ${transcript}
+
+Schema:
+{
+  "title": "short task title",
+  "deadline": "ISO datetime string",
+  "effortMinutes": number,
+  "importance": 1 | 3 | 5,
+  "category": "short category",
+  "notes": "original useful context"
 }`,
     fallback
   );

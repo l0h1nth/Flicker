@@ -124,6 +124,7 @@ label {
 
 .top-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: end;
   gap: 0.65rem;
 }
@@ -311,6 +312,16 @@ label {
   margin-top: 0.8rem;
 }
 
+.compact-row {
+  align-items: center;
+  margin-top: 0;
+}
+
+.inline-note {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
 .flare-box {
   display: grid;
   gap: 0.65rem;
@@ -332,6 +343,18 @@ label {
 .guide p {
   color: var(--muted);
   margin: 0.55rem 0;
+}
+
+.plan-item,
+.schedule-block {
+  border-top: 1px solid var(--line);
+  padding: 0.85rem 0;
+}
+
+.plan-item p,
+.schedule-block p,
+.habit p {
+  margin: 0.35rem 0 0;
 }
 
 .banner {

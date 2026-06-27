@@ -646,15 +646,15 @@ function App() {
 
       <header className="topbar">
         <div>
-          <p className="eyebrow">AI deadline rescue</p>
+          <p className="eyebrow">Deadline companion</p>
           <h1>Flicker</h1>
           <p>
             Welcome, @{dashboard.user.username}.{' '}
-            <span className="score-chip">{funMode ? '🔥 Chaos Points' : '⚡ Rescue Points'}: {dashboard.user.rescuePoints || 0}</span>
+            <span className="score-chip">{funMode ? 'Chaos points' : 'Rescue points'}: {dashboard.user.rescuePoints || 0}</span>
           </p>
         </div>
         <div className="top-actions">
-          <button className="help-chip" onClick={() => setGuideOpen(true)} title="Open guide">?</button>
+          <button className="help-chip" onClick={() => setGuideOpen(true)} title="Open guide">Guide</button>
           <label>
             Energy
             <select value={dashboard.user.energy} onChange={(event) => patchProfile({ energy: event.target.value })}>
@@ -676,14 +676,14 @@ function App() {
             Voice reminders
           </label>
           <button className="secondary" onClick={() => speak(funMode ? "I'm watching you. The deadlines are watching you. We're all watching." : 'Flicker voice is active. Deadline rescue standing by.', true)}>
-            Test 🔊
+            Test voice
           </button>
           <VoiceStatus enabled={dashboard.user.voiceReminders} funMode={funMode} />
           <button className={funMode ? 'fun-toggle active' : 'fun-toggle'} onClick={() => setFunMode(!funMode)}>
-            {funMode ? '🔥 ROAST MODE ON' : '🎭 Fun Mode'}
+            {funMode ? 'Fun mode on' : 'Fun mode'}
           </button>
           <span className={dashboard.ai?.configured ? 'ai-status live' : 'ai-status'}>
-            {dashboard.ai?.configured ? 'Gemini on' : 'Fallback AI'}
+            {dashboard.ai?.configured ? 'Gemini on' : 'Fallback mode'}
           </span>
           <button className="secondary" onClick={logout}>Logout</button>
         </div>
@@ -809,8 +809,8 @@ function Login({ onSubmit, error, loading }) {
     <main className="login-page">
       <section className="login-card">
         <p className="eyebrow">Flicker</p>
-        <h1>Stop letting reminders die quietly.</h1>
-        <p>Create two accounts in two browser windows to test friend requests and task help requests manually.</p>
+        <h1>Plan tasks, get help, finish before deadlines.</h1>
+        <p>Use one account for yourself, or open a second browser window to test friend requests.</p>
         <form onSubmit={submit}>
           <input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="username" />
           <input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="password" type="password" />
@@ -850,9 +850,9 @@ function Tutorial({ onDone }) {
 }
 
 function VoiceStatus({ enabled, funMode }) {
-  if (!canSpeak()) return <span className="voice-status unavailable">⚠️ No audio</span>;
-  if (enabled && funMode) return <span className="voice-status roast">🔥 Roast mode</span>;
-  return enabled ? <span className="voice-status on">🔊 Voice on</span> : <span className="voice-status off">🔇 Voice off</span>;
+  if (!canSpeak()) return <span className="voice-status unavailable">No audio</span>;
+  if (enabled && funMode) return <span className="voice-status roast">Voice + fun</span>;
+  return enabled ? <span className="voice-status on">Voice on</span> : <span className="voice-status off">Voice off</span>;
 }
 
 function LivePage({ tasks, friends, brief, funMode, readBriefAloud, createTask, updateTask, completeTask, aiAction, sendFlare, parseVoice, startActionLock }) {
@@ -863,15 +863,15 @@ function LivePage({ tasks, friends, brief, funMode, readBriefAloud, createTask, 
           <p className="eyebrow">Daily Signal</p>
           <h2>{brief?.headline || 'Click Daily Signal for a simple plan.'}</h2>
           {brief?.firstMove && <p>{brief.firstMove}</p>}
-          {brief && <button className="read-aloud" onClick={readBriefAloud}>🔊 Read aloud</button>}
+          {brief && <button className="read-aloud" onClick={readBriefAloud}>Read aloud</button>}
         </div>
       </section>
       <TaskForm createTask={createTask} parseVoice={parseVoice} />
       <section className="stack">
         {tasks.length === 0 ? (
           <Empty
-            title={funMode ? 'Nothing is on fire yet. Suspicious.' : "Nothing's on fire yet. 🔥"}
-            body={funMode ? "You've achieved inbox zero by having nothing due. Suspicious." : 'Add a task before that changes.'}
+            title={funMode ? 'No live tasks. Suspiciously peaceful.' : 'No live tasks yet.'}
+            body={funMode ? 'Add one task and Flicker will start watching the clock.' : 'Add a task to start planning, reminders, and friend help.'}
           />
         ) : (
           tasks.map((task) => (
@@ -1015,8 +1015,8 @@ function TaskCard({ task, friends, updateTask, completeTask, aiAction, sendFlare
         <div>
           <span className={`heat ${task.heat.className}`}>{task.heat.label}</span>
           {task.role === 'helper' && <span className="shared-pill">Shared by @{task.owner_username}</span>}
-          {funMode && task.heat.label === 'Missed' && <span className="roast-badge">💀 Hall of fame</span>}
-          <h3>{funMode && task.heat.label === 'Missed' ? `💀 ${task.title}` : task.title}</h3>
+          {funMode && task.heat.label === 'Missed' && <span className="roast-badge">Fun mode noted this</span>}
+          <h3>{task.title}</h3>
           <p>
             {task.category} · <span className={task.heat.label === 'Last Light' && countdownSeconds < 30 * 60 ? 'countdown-danger' : ''}>{timeDisplay}</span> · {task.effortMinutes} min
             {task.support_kind ? ` · ${task.support_kind}` : ''}
@@ -1188,8 +1188,8 @@ function ActionLock({ task, friends, voiceEnabled, funMode, aiAction, updateTask
         <div className="button-row">
           <button onClick={() => setRunning(true)}>Start</button>
           <button className="secondary" onClick={() => setRunning(false)}>Pause</button>
-          <button className="secondary" onClick={saveProgress}>{funMode ? 'I survived 💪' : 'I made progress'}</button>
-          <button className="secondary" onClick={() => completeTask(task)}>{funMode ? "IT'S DONE 🎉" : 'Complete task'}</button>
+          <button className="secondary" onClick={saveProgress}>{funMode ? 'Progress made' : 'I made progress'}</button>
+          <button className="secondary" onClick={() => completeTask(task)}>{funMode ? 'Done, finally' : 'Complete task'}</button>
         </div>
 
         <section className="lock-section">
@@ -1246,7 +1246,7 @@ function PlannerPage({ tasks, planDay, scheduleDay }) {
   return (
     <div className="stack">
       <section className="card">
-        <p className="eyebrow">AI priority planner</p>
+        <p className="eyebrow">Priority planner</p>
         <h2>Plan the next useful block</h2>
         <div className="form-grid compact">
           <label>
@@ -1464,7 +1464,7 @@ function RequestsPage({ incoming, outgoing, respondFlare }) {
 function AiPanel({ panel }) {
   return (
     <section className="card ai">
-      <p className="eyebrow">AI help</p>
+      <p className="eyebrow">Assistant</p>
       {!panel ? (
         <p className="muted">Use Daily Signal, Smart Nudge, Break Down, or Last Light.</p>
       ) : (
@@ -1473,7 +1473,7 @@ function AiPanel({ panel }) {
           {panel.offline && <span className="status rejected">Fallback used</span>}
           {panel.modelUsed && <span className="status accepted">Gemini: {panel.modelUsed}</span>}
           {panel.body && <p>{panel.body}</p>}
-          {panel.speechText && <button className="read-aloud ai-read" onClick={() => speak(panel.speechText, true)}>🔊 Read aloud</button>}
+          {panel.speechText && <button className="read-aloud ai-read" onClick={() => speak(panel.speechText, true)}>Read aloud</button>}
           {panel.lines?.map((line) => <p className="muted" key={line}>{line}</p>)}
           {panel.steps?.map((step) => <p className="muted" key={step.title}>{step.title} · {step.minutes} min</p>)}
           {panel.note && <p className="preview">{panel.note}</p>}

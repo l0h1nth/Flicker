@@ -13,6 +13,7 @@ const apiBase = import.meta.env.VITE_API_BASE || '';
 const tokenKey = 'flicker-token-v2';
 const funModeKey = 'flicker-fun-mode-v1';
 const darkModeKey = 'flicker-night-mode-v1';
+const voiceKey = 'flicker-voice-name-v1';
 const flareHelp = {
   'Focus sprint': 'Your friend agrees to work alongside you for a short focused session.',
   'Review / unblock': 'Your friend helps check, explain, or unblock the task. They are not doing dishonest work for you.',
@@ -115,6 +116,46 @@ function canSpeak() {
   return typeof window !== 'undefined' && 'speechSynthesis' in window;
 }
 
+function voiceId(voice) {
+  return `${voice.name}__${voice.lang}`;
+}
+
+function voiceLabel(voice) {
+  return `${voice.name} (${voice.lang})`;
+}
+
+function voiceScore(voice) {
+  const name = voice.name.toLowerCase();
+  const lang = voice.lang.toLowerCase();
+  let score = 0;
+  if (lang.startsWith('en-us')) score += 30;
+  if (lang.startsWith('en-gb') || lang.startsWith('en-in')) score += 22;
+  if (lang.startsWith('en')) score += 14;
+  if (name.includes('natural')) score += 45;
+  if (name.includes('neural')) score += 40;
+  if (name.includes('online')) score += 30;
+  if (name.includes('google')) score += 26;
+  if (name.includes('microsoft')) score += 24;
+  if (['aria', 'jenny', 'guy', 'sara', 'samantha', 'alex', 'zira'].some((item) => name.includes(item))) score += 18;
+  if (voice.localService) score += 3;
+  return score;
+}
+
+function getAvailableVoices() {
+  if (!canSpeak()) return [];
+  return window.speechSynthesis
+    .getVoices()
+    .filter((voice) => voice.lang.toLowerCase().startsWith('en'))
+    .sort((a, b) => voiceScore(b) - voiceScore(a));
+}
+
+function getPreferredVoice() {
+  const voices = getAvailableVoices();
+  if (!voices.length) return null;
+  const savedVoice = localStorage.getItem(voiceKey);
+  return voices.find((voice) => voiceId(voice) === savedVoice) || voices[0];
+}
+
 function showBrowserNotification(title, body) {
   if (!canNotify() || Notification.permission !== 'granted') return;
   new Notification(title, {
@@ -128,8 +169,12 @@ function speak(text, enabled = true) {
   if (!enabled || !canSpeak()) return;
   window.speechSynthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(text);
-  utterance.rate = 0.95;
-  utterance.pitch = 1;
+  const preferredVoice = getPreferredVoice();
+  if (preferredVoice) utterance.voice = preferredVoice;
+  utterance.lang = preferredVoice?.lang || 'en-US';
+  utterance.rate = 0.88;
+  utterance.pitch = 1.02;
+  utterance.volume = 0.92;
   window.speechSynthesis.speak(utterance);
 }
 
@@ -258,6 +303,8 @@ function App() {
   const [actionTask, setActionTask] = useState(null);
   const [funMode, setFunModeState] = useState(() => localStorage.getItem(funModeKey) === 'true');
   const [darkMode, setDarkModeState] = useState(() => localStorage.getItem(darkModeKey) === 'true');
+  const [voices, setVoices] = useState([]);
+  const [selectedVoice, setSelectedVoice] = useState(() => localStorage.getItem(voiceKey) || '');
   const [notificationsEnabled, setNotificationsEnabled] = useState(canNotify() && Notification.permission === 'granted');
   const notifiedRef = useRef(new Set());
   const spokenStageRef = useRef(new Set());
@@ -284,6 +331,12 @@ function App() {
     localStorage.setItem(darkModeKey, String(nextValue));
   }
 
+  function setVoice(nextValue) {
+    setSelectedVoice(nextValue);
+    if (nextValue) localStorage.setItem(voiceKey, nextValue);
+    else localStorage.removeItem(voiceKey);
+  }
+
   useEffect(() => {
     if (!token) return undefined;
     refresh(true);
@@ -296,6 +349,22 @@ function App() {
   useEffect(() => {
     latestDashboardRef.current = dashboard;
   }, [dashboard]);
+
+  useEffect(() => {
+    if (!canSpeak()) return undefined;
+    function loadVoices() {
+      const nextVoices = getAvailableVoices();
+      setVoices(nextVoices);
+      if (!localStorage.getItem(voiceKey) && nextVoices[0]) {
+        setSelectedVoice(voiceId(nextVoices[0]));
+      }
+    }
+    loadVoices();
+    window.speechSynthesis.onvoiceschanged = loadVoices;
+    return () => {
+      window.speechSynthesis.onvoiceschanged = null;
+    };
+  }, []);
 
   useEffect(() => {
     if (!token) return undefined;
@@ -731,6 +800,18 @@ function App() {
               />
               Voice reminders
             </label>
+            {voices.length > 0 && (
+              <label className="voice-select">
+                <span>Voice</span>
+                <select value={selectedVoice} onChange={(event) => setVoice(event.target.value)}>
+                  {voices.map((voice) => (
+                    <option key={voiceId(voice)} value={voiceId(voice)}>
+                      {voiceLabel(voice)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <button className={funMode ? 'fun-toggle active' : 'fun-toggle'} onClick={() => setFunMode(!funMode)}>
               {funMode ? 'Fun mode on' : 'Fun mode'}
             </button>

@@ -126,6 +126,7 @@ label {
   min-height: 100vh;
   padding: 1rem;
   background: var(--bg);
+  color: var(--ink);
 }
 
 .app.dark-mode {
@@ -409,6 +410,26 @@ label {
   padding: 0.35rem 0.42rem 0.35rem 0.65rem;
 }
 
+.voice-select {
+  display: grid;
+  grid-template-columns: auto minmax(150px, 240px);
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 250px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--field);
+  color: var(--muted);
+  padding: 0.35rem 0.42rem 0.35rem 0.72rem;
+}
+
+.voice-select select {
+  height: 34px;
+  min-width: 0;
+  padding: 0.35rem 0.55rem;
+  border-radius: 999px;
+}
+
 .energy-control select {
   height: 34px;
   padding: 0.35rem 0.55rem;
@@ -589,11 +610,13 @@ label {
 .card.signal h2,
 .ai h3 {
   margin: 0;
+  color: var(--ink);
   font-size: 1.2rem;
 }
 
 .card.signal p:last-child {
   margin-bottom: 0;
+  color: var(--muted);
 }
 
 .form {

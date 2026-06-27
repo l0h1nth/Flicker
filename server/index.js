@@ -377,6 +377,14 @@ function minutesUntil(deadline) {
   return Math.round((new Date(deadline).getTime() - Date.now()) / 60000);
 }
 
+function completionPoints(task) {
+  const minutesLeft = minutesUntil(task.deadline);
+  if (minutesLeft < 0) return 10;
+  if (minutesLeft <= 120) return 50;
+  if (minutesLeft <= 360) return 40;
+  return 30;
+}
+
 function formatWindow(minutes) {
   if (minutes < 0) return `${Math.abs(minutes)} minutes late`;
   if (minutes < 60) return `${minutes} minutes left`;
@@ -753,6 +761,9 @@ app.patch('/api/tasks/:taskId', auth, (req, res) => {
 app.post('/api/tasks/:taskId/complete', auth, (req, res) => {
   const task = taskForUser(req.params.taskId, req.user.id);
   if (!task) return res.status(404).json({ error: 'Task not found.' });
+  if (task.status === 'done') return res.json(dashboard(req.user.id));
+
+  const points = completionPoints(task);
 
   db.prepare(`
     UPDATE tasks
@@ -761,10 +772,13 @@ app.post('/api/tasks/:taskId/complete', auth, (req, res) => {
   `).run(now(), req.user.id, now(), req.params.taskId);
 
   if (task.role === 'helper') {
-    addActivity(req.user.id, `You completed @${task.owner_username || 'your friend'}'s task "${task.title}".`);
-    addActivity(task.owner_id, `@${req.user.username} completed "${task.title}". Moved to Finished.`);
+    db.prepare('UPDATE users SET rescue_points = rescue_points + ? WHERE id = ?').run(points + 15, req.user.id);
+    db.prepare('UPDATE users SET rescue_points = rescue_points + ? WHERE id = ?').run(Math.max(15, Math.floor(points / 2)), task.owner_id);
+    addActivity(req.user.id, `You completed @${task.owner_username || 'your friend'}'s task "${task.title}". +${points + 15} rescue points.`);
+    addActivity(task.owner_id, `@${req.user.username} completed "${task.title}". Moved to Finished. +${Math.max(15, Math.floor(points / 2))} rescue points.`);
   } else {
-    addActivity(req.user.id, `Completed "${task.title}". Moved to Finished.`);
+    db.prepare('UPDATE users SET rescue_points = rescue_points + ? WHERE id = ?').run(points, req.user.id);
+    addActivity(req.user.id, `Completed "${task.title}". Moved to Finished. +${points} rescue points.`);
   }
   res.json(dashboard(req.user.id));
 });

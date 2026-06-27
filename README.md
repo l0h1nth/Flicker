@@ -26,7 +26,7 @@ Flicker solves this by combining AI planning, deadline triage, voice assistance,
 - **Friends and Flares:** add friends by username and request focus, review, reminder check-ins, or allowed subtask support.
 - **Shared Live Tasks:** accepted Flares appear on a friend's Live board, and progress/completion updates both users.
 - **Goal and Habit Tracking:** tracks repeatable actions that reduce future deadline panic.
-- **Rescue Points:** rewards completed work and shows visible progress.
+- **Rescue Points:** rewards completed work, with bonuses for urgent saves and shared task help.
 - **Demo Mode:** loads sample tasks and a habit so judges can test the full workflow instantly.
 - **Night Mode:** persistent light/dark UI toggle.
 

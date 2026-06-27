@@ -12,6 +12,7 @@ import './styles.css';
 const apiBase = import.meta.env.VITE_API_BASE || '';
 const tokenKey = 'flicker-token-v2';
 const funModeKey = 'flicker-fun-mode-v1';
+const darkModeKey = 'flicker-night-mode-v1';
 const flareHelp = {
   'Focus sprint': 'Your friend agrees to work alongside you for a short focused session.',
   'Review / unblock': 'Your friend helps check, explain, or unblock the task. They are not doing dishonest work for you.',
@@ -256,6 +257,7 @@ function App() {
   const [guideOpen, setGuideOpen] = useState(false);
   const [actionTask, setActionTask] = useState(null);
   const [funMode, setFunModeState] = useState(() => localStorage.getItem(funModeKey) === 'true');
+  const [darkMode, setDarkModeState] = useState(() => localStorage.getItem(darkModeKey) === 'true');
   const [notificationsEnabled, setNotificationsEnabled] = useState(canNotify() && Notification.permission === 'granted');
   const notifiedRef = useRef(new Set());
   const spokenStageRef = useRef(new Set());
@@ -275,6 +277,11 @@ function App() {
   function setFunMode(nextValue) {
     setFunModeState(nextValue);
     localStorage.setItem(funModeKey, String(nextValue));
+  }
+
+  function setDarkMode(nextValue) {
+    setDarkModeState(nextValue);
+    localStorage.setItem(darkModeKey, String(nextValue));
   }
 
   useEffect(() => {
@@ -626,8 +633,18 @@ function App() {
     return <Login onSubmit={login} error={error} loading={loading} />;
   }
 
+  const tabs = [
+    ['live', `Live (${liveTasks.length})`, 'Tasks that still need action.'],
+    ['planner', 'Planner', 'Prioritize tasks and create schedule blocks.'],
+    ['habits', `Habits (${dashboard.habits?.length || 0})`, 'Repeatable goals that prevent future panic.'],
+    ['finished', `Finished (${completedTasks.length})`, 'Completed work moved out of your way.'],
+    ['crew', `Crew (${dashboard.friends.length})`, 'Friends who can check in or help.'],
+    ['requests', `Requests (${dashboard.incomingHelpRequests.filter((r) => r.status === 'pending').length})`, 'Incoming and outgoing flares.']
+  ];
+  const activeTab = tabs.find(([key]) => key === tab) || tabs[0];
+
   return (
-    <main className={`${lastLight ? 'app alert' : 'app'}${funMode ? ' fun-mode' : ''}`}>
+    <main className={`${lastLight ? 'app alert' : 'app'}${funMode ? ' fun-mode' : ''}${darkMode ? ' dark-mode' : ''}`}>
       {!dashboard.user.tutorialSeen && <Tutorial onDone={() => patchProfile({ tutorialSeen: true })} />}
       {guideOpen && <GuideModal onClose={() => setGuideOpen(false)} />}
       {actionTask && (
@@ -644,24 +661,57 @@ function App() {
         />
       )}
 
-      <header className="topbar">
-        <div className="brand-block">
-          <p className="eyebrow">Deadline companion</p>
-          <h1>Flicker</h1>
-          <p>
-            Welcome, @{dashboard.user.username}.{' '}
-            <span className="score-chip">{funMode ? 'Chaos points' : 'Rescue points'}: {dashboard.user.rescuePoints || 0}</span>
-          </p>
-        </div>
-        <div className="top-actions">
-          <div className="toolbar-row toolbar-primary">
-            <button className="help-chip" onClick={() => setGuideOpen(true)} title="Open guide">Guide</button>
-            <button onClick={aiBrief}>Daily Signal</button>
-            <button className="secondary" onClick={() => speak(funMode ? "I'm watching you. The deadlines are watching you. We're all watching." : 'Flicker voice is active. Deadline rescue standing by.', true)}>
-              Test voice
-            </button>
+      <div className="app-shell">
+        <aside className="sidebar">
+          <div className="sidebar-brand">
+            <p className="eyebrow">Deadline companion</p>
+            <h1>Flicker</h1>
+            <p>@{dashboard.user.username}</p>
           </div>
-          <div className="toolbar-row toolbar-settings">
+
+          <div className="profile-card">
+            <span>{funMode ? 'Chaos points' : 'Rescue points'}</span>
+            <strong>{dashboard.user.rescuePoints || 0}</strong>
+          </div>
+
+          <nav className="side-nav">
+            {tabs.map(([key, label]) => (
+              <button key={key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>
+                {label}
+              </button>
+            ))}
+          </nav>
+
+          <div className="sidebar-status">
+            <VoiceStatus enabled={dashboard.user.voiceReminders} funMode={funMode} />
+            <span className={dashboard.ai?.configured ? 'ai-status live' : 'ai-status'}>
+              {dashboard.ai?.configured ? 'Gemini on' : 'Fallback mode'}
+            </span>
+          </div>
+
+          <button className="secondary logout-button" onClick={logout}>Logout</button>
+        </aside>
+
+        <section className="workspace">
+          <header className="workspace-top">
+            <div>
+              <p className="eyebrow">Current view</p>
+              <h2>{activeTab[1]}</h2>
+              <p>{activeTab[2]}</p>
+            </div>
+            <div className="quick-actions">
+              <button onClick={aiBrief}>Daily Signal</button>
+              <button className="secondary" onClick={() => setGuideOpen(true)}>Guide</button>
+              <button className="secondary" onClick={() => speak(funMode ? "I'm watching you. The deadlines are watching you. We're all watching." : 'Flicker voice is active. Deadline rescue standing by.', true)}>
+                Test voice
+              </button>
+              <button className={darkMode ? 'mode-toggle active' : 'mode-toggle'} onClick={() => setDarkMode(!darkMode)}>
+                {darkMode ? 'Night on' : 'Night mode'}
+              </button>
+            </div>
+          </header>
+
+          <section className="control-strip">
             <label className="energy-control">
               <span>Energy</span>
               <select value={dashboard.user.energy} onChange={(event) => patchProfile({ energy: event.target.value })}>
@@ -684,119 +734,97 @@ function App() {
             <button className={funMode ? 'fun-toggle active' : 'fun-toggle'} onClick={() => setFunMode(!funMode)}>
               {funMode ? 'Fun mode on' : 'Fun mode'}
             </button>
-          </div>
-          <div className="toolbar-row toolbar-status">
-            <VoiceStatus enabled={dashboard.user.voiceReminders} funMode={funMode} />
-            <span className={dashboard.ai?.configured ? 'ai-status live' : 'ai-status'}>
-              {dashboard.ai?.configured ? 'Gemini on' : 'Fallback mode'}
-            </span>
-            <button className="secondary logout-button" onClick={logout}>Logout</button>
-          </div>
-        </div>
-      </header>
+          </section>
 
-      {lastLight && (
-        <section className="banner">
-          <strong>Last Light:</strong>
-          <span>{lastLight.title} has {timeLeft(lastLight.heat.minutesLeft)}.</span>
-          <button onClick={() => aiAction('last', lastLight)}>Show 3 moves</button>
+          {lastLight && (
+            <section className="banner">
+              <strong>Last Light:</strong>
+              <span>{lastLight.title} has {timeLeft(lastLight.heat.minutesLeft)}.</span>
+              <button onClick={() => aiAction('last', lastLight)}>Show 3 moves</button>
+            </section>
+          )}
+
+          {error && <div className="error">{error}</div>}
+          {loading && <div className="loading">{loading}</div>}
+
+          <section className="pulse-row">
+            <div className="pulse-card">
+              <span>Live</span>
+              <strong>{liveTasks.length}</strong>
+            </div>
+            <div className="pulse-card hot">
+              <span>Urgent</span>
+              <strong>{liveTasks.filter((task) => task.heat.level >= 4).length}</strong>
+            </div>
+            <div className="pulse-card">
+              <span>Shared</span>
+              <strong>{liveTasks.filter((task) => task.role === 'helper').length}</strong>
+            </div>
+            <div className="pulse-card">
+              <span>Habits</span>
+              <strong>{dashboard.habits?.length || 0}</strong>
+            </div>
+          </section>
+
+          <section className="layout">
+            <section className="main-panel">
+              {tab === 'live' && (
+                <LivePage
+                  tasks={liveTasks}
+                  friends={dashboard.friends}
+                  brief={brief}
+                  funMode={funMode}
+                  readBriefAloud={readBriefAloud}
+                  createTask={createTask}
+                  updateTask={updateTask}
+                  completeTask={completeTask}
+                  aiAction={aiAction}
+                  sendFlare={sendFlare}
+                  parseVoice={parseVoice}
+                  startActionLock={openActionLock}
+                />
+              )}
+              {tab === 'planner' && (
+                <PlannerPage
+                  tasks={liveTasks}
+                  planDay={planDay}
+                  scheduleDay={scheduleDay}
+                />
+              )}
+              {tab === 'habits' && (
+                <HabitsPage
+                  habits={dashboard.habits || []}
+                  createHabit={createHabit}
+                  checkHabit={checkHabit}
+                  resetHabit={resetHabit}
+                  deleteHabit={deleteHabit}
+                />
+              )}
+              {tab === 'finished' && <FinishedPage tasks={completedTasks} />}
+              {tab === 'crew' && (
+                <CrewPage
+                  dashboard={dashboard}
+                  sendFriendRequest={sendFriendRequest}
+                  respondFriend={respondFriend}
+                  patchProfile={patchProfile}
+                />
+              )}
+              {tab === 'requests' && (
+                <RequestsPage
+                  incoming={dashboard.incomingHelpRequests}
+                  outgoing={dashboard.outgoingHelpRequests}
+                  respondFlare={respondFlare}
+                />
+              )}
+            </section>
+
+            <aside className="side">
+              <AiPanel panel={panel} />
+              <Activity activity={dashboard.activity} />
+            </aside>
+          </section>
         </section>
-      )}
-
-      {error && <div className="error">{error}</div>}
-      {loading && <div className="loading">{loading}</div>}
-
-      <section className="pulse-row">
-        <div className="pulse-card">
-          <span>Live</span>
-          <strong>{liveTasks.length}</strong>
-        </div>
-        <div className="pulse-card hot">
-          <span>Urgent</span>
-          <strong>{liveTasks.filter((task) => task.heat.level >= 4).length}</strong>
-        </div>
-        <div className="pulse-card">
-          <span>Shared</span>
-          <strong>{liveTasks.filter((task) => task.role === 'helper').length}</strong>
-        </div>
-        <div className="pulse-card">
-          <span>Habits</span>
-          <strong>{dashboard.habits?.length || 0}</strong>
-        </div>
-      </section>
-
-      <nav className="tabs">
-        {[
-          ['live', `Live (${liveTasks.length})`],
-          ['planner', 'Planner'],
-          ['habits', `Habits (${dashboard.habits?.length || 0})`],
-          ['finished', `Finished (${completedTasks.length})`],
-          ['crew', `Crew (${dashboard.friends.length})`],
-          ['requests', `Requests (${dashboard.incomingHelpRequests.filter((r) => r.status === 'pending').length})`]
-        ].map(([key, label]) => (
-          <button key={key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>
-            {label}
-          </button>
-        ))}
-      </nav>
-
-      <section className="layout">
-        <section className="main-panel">
-          {tab === 'live' && (
-            <LivePage
-              tasks={liveTasks}
-              friends={dashboard.friends}
-              brief={brief}
-              funMode={funMode}
-              readBriefAloud={readBriefAloud}
-              createTask={createTask}
-              updateTask={updateTask}
-              completeTask={completeTask}
-              aiAction={aiAction}
-              sendFlare={sendFlare}
-              parseVoice={parseVoice}
-              startActionLock={openActionLock}
-            />
-          )}
-          {tab === 'planner' && (
-            <PlannerPage
-              tasks={liveTasks}
-              planDay={planDay}
-              scheduleDay={scheduleDay}
-            />
-          )}
-          {tab === 'habits' && (
-            <HabitsPage
-              habits={dashboard.habits || []}
-              createHabit={createHabit}
-              checkHabit={checkHabit}
-              resetHabit={resetHabit}
-              deleteHabit={deleteHabit}
-            />
-          )}
-          {tab === 'finished' && <FinishedPage tasks={completedTasks} />}
-          {tab === 'crew' && (
-            <CrewPage
-              dashboard={dashboard}
-              sendFriendRequest={sendFriendRequest}
-              respondFriend={respondFriend}
-              patchProfile={patchProfile}
-            />
-          )}
-          {tab === 'requests' && (
-            <RequestsPage
-              incoming={dashboard.incomingHelpRequests}
-              outgoing={dashboard.outgoingHelpRequests}
-              respondFlare={respondFlare}
-            />
-          )}
-        </section>
-
-        <aside className="side">
-          <AiPanel panel={panel} />
-          <Activity activity={dashboard.activity} />
-        </aside>
-      </section>
+      </div>
     </main>
   );
 }

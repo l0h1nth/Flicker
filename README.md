@@ -9,7 +9,9 @@ It turns passive reminders into action nudges, detects deadline heat, and lets u
 - AI daily brief for the user's current task board
 - AI Priority Planner for ranking what to do first
 - AI schedule blocks based on available time
+- Action Lock focus mode with timer, blocker help, snooze consequence, and friend escalation
 - Browser notifications for urgent tasks and reminder check-ins while Flicker is open
+- Optional voice reminders using browser speech synthesis
 - Calendar export through `.ics` files
 - Voice task capture using the browser Speech API
 - Goal and habit tracking
@@ -79,11 +81,13 @@ Flicker uses Gemini when `GEMINI_API_KEY` is available in `.env`. The UI shows `
 The main AI actions are:
 
 - **Daily Signal:** a simple plan for the current board.
+- **Action Lock:** focused rescue mode that turns a task into one timed action.
 - **Plan My Day:** ranks live tasks and explains what to do first, delay, or ask help for.
 - **Build Schedule:** creates short focus blocks from available time.
 - **Smart Nudge:** one next action for a task.
 - **Break Down:** small steps for an overwhelming task.
 - **Last Light:** emergency steps when time is tight.
+- **Friend Check-In Escalation:** asks a friend to check in if progress stalls.
 - **Voice Task Parsing:** turns spoken task text into a task draft.
 
 Build and serve production:
@@ -104,6 +108,8 @@ Production app: `http://localhost:8080`
 - Add a habit such as daily study or job applications.
 - Use Speak Task to add a task by voice.
 - Enable notifications and send a Reminder Check-in Flare.
+- Start Action Lock and show the blocker / friend escalation flow.
+- Toggle Voice Reminders to hear urgent task reminders out loud.
 - Add a friend by username and send a Flare.
 - Accept the Flare from a second account and complete the shared task.
 - Show the task moving from Live to Finished for both users.

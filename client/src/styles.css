@@ -169,6 +169,21 @@ label {
   font-weight: 900;
 }
 
+.voice-toggle {
+  align-self: end;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  border-radius: 999px;
+  background: #f1e9e2;
+  color: var(--ink);
+  padding: 0.55rem 0.75rem;
+}
+
+.voice-toggle input {
+  width: auto;
+}
+
 .eyebrow {
   margin: 0 0 0.5rem;
   color: var(--accent-dark);
@@ -617,6 +632,35 @@ label {
 
 .modal li {
   margin: 0.55rem 0;
+}
+
+.action-lock {
+  background:
+    radial-gradient(circle at 100% 0%, rgba(240, 90, 51, 0.18), transparent 16rem),
+    white;
+}
+
+.lock-timer {
+  border-radius: 16px;
+  background: #171514;
+  color: white;
+  font-size: clamp(3rem, 12vw, 7rem);
+  font-weight: 900;
+  line-height: 1;
+  margin: 1rem 0;
+  padding: 1.1rem;
+  text-align: center;
+}
+
+.lock-copy {
+  color: var(--muted);
+  font-size: 1.05rem;
+}
+
+.lock-section {
+  border-top: 1px solid var(--line);
+  margin-top: 1rem;
+  padding-top: 1rem;
 }
 
 @media (max-width: 980px) {

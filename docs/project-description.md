@@ -15,9 +15,11 @@ Traditional reminder apps are passive. They tell users that something is due, bu
 - **Daily Signal:** Gemini generates a short daily brief with the most important action.
 - **AI Priority Planner:** Gemini ranks live tasks and recommends what to do first, delay, or ask help for.
 - **AI Schedule Blocks:** Gemini converts available time into short focus blocks.
+- **Action Lock:** A focused rescue screen with timer, blocker help, snooze consequences, and friend escalation.
 - **Deadline Heat:** Tasks are marked Calm, Warming, Hot, Critical, or Last Light.
 - **Smart Nudges:** Reminders include a specific next action, safe snooze time, and trade-off awareness.
 - **Context-Aware Notifications:** Browser notifications alert users about urgent tasks and reminder check-ins while Flicker is open.
+- **Voice Reminders:** Users can enable spoken urgent reminders through browser speech synthesis.
 - **Calendar Export:** Users can download task or schedule blocks as `.ics` calendar files.
 - **Voice Task Capture:** Users can speak a task and Gemini parses it into title, deadline, effort, importance, and category.
 - **Goal And Habit Tracking:** Users track repeatable actions that reduce future deadline panic.
@@ -28,6 +30,7 @@ Traditional reminder apps are passive. They tell users that something is due, bu
 - **Panic Crew:** Users add friends by username and send a Flare when they need support.
 - **Friend Request Flow:** Friends can accept or reject connection requests.
 - **Flare Response Flow:** Friends can volunteer or reject task help requests.
+- **Friend Check-In Escalation:** If a user asks for a reminder check-in and does not update progress, Flicker escalates the check-in to the friend.
 - **Allowed Subtask Takeover:** For appropriate shared tasks, friends can accept a takeover request and earn extra rescue points.
 - **Shared Live Tasks:** Once a friend volunteers, the task appears on their Live page. Progress and completion update both users.
 - **Auto Refresh:** Dashboards refresh automatically so two logged-in users can test the collaboration flow without manual reloads.
@@ -63,14 +66,16 @@ Flicker is not just another to-do list. It combines practical AI planning with s
 3. View Deadline Heat on the Today Board.
 4. Use Planner to generate priorities and schedule blocks.
 5. Export the generated schedule as a calendar file.
-6. Use Smart Nudge to get a specific next action.
-7. Use Break It Down for a large task.
-8. Trigger Last Light mode for an urgent task.
-9. Add a habit and check it in.
-10. Use voice input to draft a task.
-11. Log into a second account and accept or reject the Flare.
-12. Show the accepted task on the friend's Live page.
-13. Complete the task as the friend and show that it moves from Live to Finished for both users.
+6. Start Action Lock for an urgent task.
+7. Show blocker help, snooze consequence, and friend check-in escalation.
+8. Use Smart Nudge to get a specific next action.
+9. Use Break It Down for a large task.
+10. Trigger Last Light mode for an urgent task.
+11. Add a habit and check it in.
+12. Use voice input to draft a task.
+13. Log into a second account and accept or reject the Flare.
+14. Show the accepted task on the friend's Live page.
+15. Complete the task as the friend and show that it moves from Live to Finished for both users.
 
 ## Submission Checklist
 

@@ -34,6 +34,7 @@ db.exec(`
     tutorial_seen INTEGER DEFAULT 0,
     public_misses INTEGER DEFAULT 0,
     show_task_names INTEGER DEFAULT 0,
+    voice_reminders INTEGER DEFAULT 0,
     rescue_points INTEGER DEFAULT 0,
     created_at TEXT NOT NULL
   );
@@ -83,6 +84,9 @@ db.exec(`
     kind TEXT NOT NULL,
     message TEXT DEFAULT '',
     status TEXT NOT NULL DEFAULT 'pending',
+    escalation_minutes INTEGER DEFAULT 0,
+    escalation_due_at TEXT,
+    escalation_sent INTEGER DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
@@ -115,7 +119,11 @@ db.exec(`
 `);
 
 for (const migration of [
-  'ALTER TABLE tasks ADD COLUMN completed_by TEXT'
+  'ALTER TABLE tasks ADD COLUMN completed_by TEXT',
+  'ALTER TABLE users ADD COLUMN voice_reminders INTEGER DEFAULT 0',
+  'ALTER TABLE help_requests ADD COLUMN escalation_minutes INTEGER DEFAULT 0',
+  'ALTER TABLE help_requests ADD COLUMN escalation_due_at TEXT',
+  'ALTER TABLE help_requests ADD COLUMN escalation_sent INTEGER DEFAULT 0'
 ]) {
   try {
     db.exec(migration);
@@ -179,6 +187,7 @@ function userView(user) {
     tutorialSeen: Boolean(user.tutorial_seen),
     publicMisses: Boolean(user.public_misses),
     showTaskNames: Boolean(user.show_task_names),
+    voiceReminders: Boolean(user.voice_reminders),
     rescuePoints: Number(user.rescue_points || 0)
   };
 }
@@ -186,6 +195,31 @@ function userView(user) {
 function addActivity(userId, message) {
   db.prepare('INSERT INTO activity (id, user_id, message, created_at) VALUES (?, ?, ?, ?)')
     .run(id(), userId, message, now());
+}
+
+function processEscalations(userId) {
+  const dueRequests = db.prepare(`
+    SELECT help_requests.*, tasks.title, tasks.progress, friend.username AS friendUsername, owner.username AS ownerUsername
+    FROM help_requests
+    JOIN tasks ON tasks.id = help_requests.task_id
+    JOIN users AS friend ON friend.id = help_requests.friend_id
+    JOIN users AS owner ON owner.id = help_requests.owner_id
+    WHERE help_requests.owner_id = ?
+      AND help_requests.status = 'accepted'
+      AND help_requests.escalation_minutes > 0
+      AND help_requests.escalation_sent = 0
+      AND help_requests.escalation_due_at IS NOT NULL
+      AND datetime(help_requests.escalation_due_at) <= datetime('now')
+      AND tasks.status = 'active'
+      AND tasks.progress < 100
+  `).all(userId);
+
+  for (const request of dueRequests) {
+    db.prepare('UPDATE help_requests SET escalation_sent = 1, updated_at = ? WHERE id = ?')
+      .run(now(), request.id);
+    addActivity(request.friend_id, `Check in with @${request.ownerUsername}: "${request.title}" still needs progress.`);
+    addActivity(request.owner_id, `Escalated reminder check-in to @${request.friendUsername} for "${request.title}".`);
+  }
 }
 
 function auth(req, res, next) {
@@ -477,6 +511,7 @@ function parseVoiceFallback(transcript) {
 }
 
 function dashboard(userId) {
+  processEscalations(userId);
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
   const liveTasks = [...tasksFor(userId, 'active'), ...sharedTasksFor(userId, 'active')]
     .sort((a, b) => new Date(a.deadline) - new Date(b.deadline));
@@ -541,7 +576,7 @@ function dashboard(userId) {
     SELECT id, message, created_at AS createdAt
     FROM activity
     WHERE user_id = ?
-    ORDER BY datetime(created_at) DESC
+    ORDER BY rowid DESC
     LIMIT 12
   `).all(userId);
 
@@ -633,12 +668,13 @@ app.patch('/api/profile', auth, (req, res) => {
   const tutorialSeen = req.body.tutorialSeen === undefined ? req.user.tutorial_seen : Number(Boolean(req.body.tutorialSeen));
   const publicMisses = req.body.publicMisses === undefined ? req.user.public_misses : Number(Boolean(req.body.publicMisses));
   const showTaskNames = req.body.showTaskNames === undefined ? req.user.show_task_names : Number(Boolean(req.body.showTaskNames));
+  const voiceReminders = req.body.voiceReminders === undefined ? req.user.voice_reminders : Number(Boolean(req.body.voiceReminders));
 
   db.prepare(`
     UPDATE users
-    SET energy = ?, tutorial_seen = ?, public_misses = ?, show_task_names = ?
+    SET energy = ?, tutorial_seen = ?, public_misses = ?, show_task_names = ?, voice_reminders = ?
     WHERE id = ?
-  `).run(energy, tutorialSeen, publicMisses, showTaskNames, req.user.id);
+  `).run(energy, tutorialSeen, publicMisses, showTaskNames, voiceReminders, req.user.id);
 
   res.json(dashboard(req.user.id));
 });
@@ -822,12 +858,17 @@ app.post('/api/tasks/:taskId/flares', auth, (req, res) => {
 
   const requestId = id();
   const kind = String(req.body.kind || 'Focus sprint');
+  const escalationMinutes = Math.max(0, Number(req.body.escalationMinutes || 0));
+  const escalationDueAt = escalationMinutes ? new Date(Date.now() + escalationMinutes * 60000).toISOString() : null;
   db.prepare(`
-    INSERT INTO help_requests (id, task_id, owner_id, friend_id, kind, message, status, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)
-  `).run(requestId, task.id, req.user.id, friend.id, kind, String(req.body.message || ''), now(), now());
+    INSERT INTO help_requests (
+      id, task_id, owner_id, friend_id, kind, message, status,
+      escalation_minutes, escalation_due_at, escalation_sent, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, 0, ?, ?)
+  `).run(requestId, task.id, req.user.id, friend.id, kind, String(req.body.message || ''), escalationMinutes, escalationDueAt, now(), now());
   addActivity(req.user.id, `Sent @${friend.username} a flare for "${task.title}".`);
-  addActivity(friend.id, `@${req.user.username} asked for help: ${kind} on "${task.title}".`);
+  addActivity(friend.id, `@${req.user.username} asked for help: ${kind} on "${task.title}".${escalationMinutes ? ` Check in after ${escalationMinutes} minutes if progress stalls.` : ''}`);
   res.json(dashboard(req.user.id));
 });
 

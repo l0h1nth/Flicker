@@ -64,6 +64,15 @@ function showBrowserNotification(title, body) {
   });
 }
 
+function speak(text, enabled = true) {
+  if (!enabled || typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.rate = 0.95;
+  utterance.pitch = 1;
+  window.speechSynthesis.speak(utterance);
+}
+
 function toLocalInputValue(isoString) {
   const date = new Date(isoString);
   if (Number.isNaN(date.getTime())) return soon(24);
@@ -136,6 +145,7 @@ function App() {
   const [loading, setLoading] = useState('');
   const [error, setError] = useState('');
   const [guideOpen, setGuideOpen] = useState(false);
+  const [actionTask, setActionTask] = useState(null);
   const [notificationsEnabled, setNotificationsEnabled] = useState(canNotify() && Notification.permission === 'granted');
   const notifiedRef = useRef(new Set());
   const dashboardReadyRef = useRef(false);
@@ -185,12 +195,12 @@ function App() {
   async function refresh(silent = false) {
     await run('Loading Flicker', async () => {
       const data = await api('/api/dashboard');
-      maybeNotify(data);
+      maybeNotify(data, dashboard?.user?.voiceReminders);
       setDashboard(data);
     }, silent);
   }
 
-  function maybeNotify(data) {
+  function maybeNotify(data, voiceEnabled = false) {
     if (!dashboardReadyRef.current) {
       dashboardReadyRef.current = true;
       return;
@@ -205,6 +215,7 @@ function App() {
           request.kind === 'Reminder check-in' ? 'Reminder check-in request' : 'New Flare request',
           `@${request.ownerUsername} needs ${request.kind} for "${request.taskTitle}".`
         );
+        speak(`Flicker check-in. ${request.ownerUsername} needs ${request.kind} for ${request.taskTitle}.`, voiceEnabled);
       }
     }
 
@@ -213,6 +224,7 @@ function App() {
       if (task.heat.minutesLeft >= 0 && task.heat.minutesLeft <= 120 && !notifiedRef.current.has(key)) {
         notifiedRef.current.add(key);
         showBrowserNotification('Task needs action', `"${task.title}" has ${timeLeft(task.heat.minutesLeft)}.`);
+        speak(`Flicker reminder. ${task.title} has ${timeLeft(task.heat.minutesLeft)}. Start an action lock now.`, voiceEnabled);
       }
     }
   }
@@ -421,6 +433,18 @@ function App() {
     <main className={lastLight ? 'app alert' : 'app'}>
       {!dashboard.user.tutorialSeen && <Tutorial onDone={() => patchProfile({ tutorialSeen: true })} />}
       {guideOpen && <GuideModal onClose={() => setGuideOpen(false)} />}
+      {actionTask && (
+        <ActionLock
+          task={actionTask}
+          friends={dashboard.friends}
+          voiceEnabled={dashboard.user.voiceReminders}
+          aiAction={aiAction}
+          updateTask={updateTask}
+          completeTask={completeTask}
+          sendFlare={sendFlare}
+          onClose={() => setActionTask(null)}
+        />
+      )}
 
       <header className="topbar">
         <div>
@@ -442,6 +466,14 @@ function App() {
           <button className="secondary" onClick={enableNotifications}>
             {notificationsEnabled ? 'Notifications on' : 'Enable notifications'}
           </button>
+          <label className="voice-toggle">
+            <input
+              type="checkbox"
+              checked={dashboard.user.voiceReminders}
+              onChange={(event) => patchProfile({ voiceReminders: event.target.checked })}
+            />
+            Voice reminders
+          </label>
           <span className={dashboard.ai?.configured ? 'ai-status live' : 'ai-status'}>
             {dashboard.ai?.configured ? 'Gemini on' : 'Fallback AI'}
           </span>
@@ -507,6 +539,7 @@ function App() {
               aiAction={aiAction}
               sendFlare={sendFlare}
               parseVoice={parseVoice}
+              startActionLock={setActionTask}
             />
           )}
           {tab === 'planner' && (
@@ -596,6 +629,8 @@ function Tutorial({ onDone }) {
           <li><strong>Requests</strong> is where friends accept or reject your flares.</li>
           <li><strong>Planner</strong> creates priorities, schedule blocks, and calendar files.</li>
           <li><strong>Habits</strong> tracks repeatable goals that prevent deadline panic.</li>
+          <li><strong>Action Lock</strong> starts a focused rescue timer with blocker help and escalation.</li>
+          <li><strong>Voice reminders</strong> speak urgent reminders when enabled.</li>
           <li><strong>Smart Nudge</strong> gives one next action. <strong>Break Down</strong> splits a task. <strong>Last Light</strong> gives emergency steps.</li>
         </ol>
         <button onClick={onDone}>Got it</button>
@@ -604,7 +639,7 @@ function Tutorial({ onDone }) {
   );
 }
 
-function LivePage({ tasks, friends, brief, createTask, updateTask, completeTask, aiAction, sendFlare, parseVoice }) {
+function LivePage({ tasks, friends, brief, createTask, updateTask, completeTask, aiAction, sendFlare, parseVoice, startActionLock }) {
   return (
     <div className="stack">
       <section className="card signal">
@@ -628,6 +663,7 @@ function LivePage({ tasks, friends, brief, createTask, updateTask, completeTask,
               completeTask={completeTask}
               aiAction={aiAction}
               sendFlare={sendFlare}
+              startActionLock={startActionLock}
             />
           ))
         )}
@@ -726,10 +762,16 @@ function TaskForm({ createTask, parseVoice }) {
   );
 }
 
-function TaskCard({ task, friends, updateTask, completeTask, aiAction, sendFlare }) {
+function TaskCard({ task, friends, updateTask, completeTask, aiAction, sendFlare, startActionLock }) {
   const [friendId, setFriendId] = useState('');
   const [kind, setKind] = useState('Focus sprint');
   const [message, setMessage] = useState('');
+  const [escalationMinutes, setEscalationMinutes] = useState(kind === 'Reminder check-in' ? 30 : 0);
+
+  useEffect(() => {
+    if (kind === 'Reminder check-in' && !escalationMinutes) setEscalationMinutes(30);
+    if (kind !== 'Reminder check-in' && escalationMinutes) setEscalationMinutes(0);
+  }, [kind]);
 
   return (
     <article className={`card task ${task.heat.className}`}>
@@ -752,6 +794,7 @@ function TaskCard({ task, friends, updateTask, completeTask, aiAction, sendFlare
       </label>
       {task.notes && <p className="muted">{task.notes}</p>}
       <div className="button-row">
+        <button onClick={() => startActionLock(task)}>Action Lock</button>
         <button className="secondary" onClick={() => aiAction('nudge', task)}>Smart Nudge</button>
         <button className="secondary" onClick={() => aiAction('breakdown', task)}>Break Down</button>
         <button className="secondary danger-button" onClick={() => aiAction('last', task)}>Last Light</button>
@@ -777,11 +820,23 @@ function TaskCard({ task, friends, updateTask, completeTask, aiAction, sendFlare
                 </select>
               </div>
               <p className="preview"><strong>Preview:</strong> {flareHelp[kind]}</p>
+              {kind === 'Reminder check-in' && (
+                <label>
+                  Escalate if I do not progress in
+                  <select value={escalationMinutes} onChange={(event) => setEscalationMinutes(Number(event.target.value))}>
+                    <option value="0">No escalation</option>
+                    <option value="5">5 minutes</option>
+                    <option value="15">15 minutes</option>
+                    <option value="30">30 minutes</option>
+                    <option value="60">1 hour</option>
+                  </select>
+                </label>
+              )}
               <input value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Short message for your friend" />
               <button
                 className="secondary"
                 disabled={!friendId}
-                onClick={() => sendFlare(task, { friendId, kind, message })}
+                onClick={() => sendFlare(task, { friendId, kind, message, escalationMinutes: kind === 'Reminder check-in' ? escalationMinutes : 0 })}
               >
                 Send request
               </button>
@@ -793,6 +848,112 @@ function TaskCard({ task, friends, updateTask, completeTask, aiAction, sendFlare
         <p className="preview">You accepted this Flare. Updating progress or completing it will update both dashboards.</p>
       )}
     </article>
+  );
+}
+
+function ActionLock({ task, friends, voiceEnabled, aiAction, updateTask, completeTask, sendFlare, onClose }) {
+  const [secondsLeft, setSecondsLeft] = useState(12 * 60);
+  const [running, setRunning] = useState(false);
+  const [friendId, setFriendId] = useState(friends[0]?.id || '');
+  const [blocker, setBlocker] = useState('');
+  const nextProgress = Math.min(100, Number(task.progress || 0) + 20);
+
+  useEffect(() => {
+    speak(`Action lock started for ${task.title}. Your only job is the next twelve minutes.`, voiceEnabled);
+  }, []);
+
+  useEffect(() => {
+    if (!running || secondsLeft <= 0) return undefined;
+    const timer = setInterval(() => setSecondsLeft((value) => Math.max(0, value - 1)), 1000);
+    return () => clearInterval(timer);
+  }, [running, secondsLeft]);
+
+  useEffect(() => {
+    if (secondsLeft === 0) {
+      speak(`Action lock finished. Update progress for ${task.title}.`, voiceEnabled);
+    }
+  }, [secondsLeft]);
+
+  const minutes = Math.floor(secondsLeft / 60);
+  const seconds = String(secondsLeft % 60).padStart(2, '0');
+  const snoozeTime = new Date(Date.now() + 30 * 60000);
+  const finishTime = new Date(snoozeTime.getTime() + Number(task.effortMinutes || 30) * 60000);
+
+  async function saveProgress() {
+    await updateTask(task.id, { progress: nextProgress });
+    onClose();
+  }
+
+  async function askFriendNow() {
+    if (!friendId) return;
+    await sendFlare(task, {
+      friendId,
+      kind: 'Reminder check-in',
+      message: 'I am in Action Lock. Please check in if I do not update progress soon.',
+      escalationMinutes: 15
+    });
+  }
+
+  function handleBlocker(value) {
+    setBlocker(value);
+    if (value === 'too-big') aiAction('breakdown', task);
+    if (value === 'stuck-starting') aiAction('nudge', task);
+    if (value === 'out-of-time') aiAction('last', task);
+  }
+
+  return (
+    <div className="modal-backdrop">
+      <section className="modal action-lock">
+        <div className="modal-head">
+          <div>
+            <p className="eyebrow">Action Lock</p>
+            <h2>{task.title}</h2>
+          </div>
+          <button className="secondary" onClick={onClose}>Exit</button>
+        </div>
+
+        <div className="lock-timer">{minutes}:{seconds}</div>
+        <p className="lock-copy">No full planning now. Do one visible action, then update progress.</p>
+
+        <div className="button-row">
+          <button onClick={() => setRunning(true)}>Start</button>
+          <button className="secondary" onClick={() => setRunning(false)}>Pause</button>
+          <button className="secondary" onClick={saveProgress}>I made progress</button>
+          <button className="secondary" onClick={() => completeTask(task)}>Complete task</button>
+        </div>
+
+        <section className="lock-section">
+          <p className="eyebrow">Minimum save</p>
+          <p>Make the smallest version that counts. If you cannot finish, leave behind proof of progress: outline, draft, payment step, notes, or a sent message.</p>
+        </section>
+
+        <section className="lock-section">
+          <p className="eyebrow">I am blocked</p>
+          <div className="button-row">
+            <button className={blocker === 'too-big' ? '' : 'secondary'} onClick={() => handleBlocker('too-big')}>Too big</button>
+            <button className={blocker === 'stuck-starting' ? '' : 'secondary'} onClick={() => handleBlocker('stuck-starting')}>Cannot start</button>
+            <button className={blocker === 'out-of-time' ? '' : 'secondary'} onClick={() => handleBlocker('out-of-time')}>Out of time</button>
+          </div>
+        </section>
+
+        <section className="lock-section">
+          <p className="eyebrow">Snooze consequence</p>
+          <p className="preview">If you snooze 30 minutes, your likely finish moves to {finishTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}. Start a short lock instead if this task matters.</p>
+        </section>
+
+        {!!friends.length && (
+          <section className="lock-section">
+            <p className="eyebrow">Escalate to friend</p>
+            <div className="form-grid compact">
+              <select value={friendId} onChange={(event) => setFriendId(event.target.value)}>
+                {friends.map((friend) => <option key={friend.id} value={friend.id}>@{friend.username}</option>)}
+              </select>
+              <button className="secondary" onClick={askFriendNow}>Check in if I stall</button>
+            </div>
+          </section>
+        )}
+      </section>
+    </div>
   );
 }
 
@@ -1064,11 +1225,13 @@ function GuideModal({ onClose }) {
         </div>
         <div className="guide-grid">
           <p><strong>Daily Signal</strong><span>A simple plan for your current board.</span></p>
+          <p><strong>Action Lock</strong><span>A focused rescue screen with timer, blocker help, and friend escalation.</span></p>
           <p><strong>Smart Nudge</strong><span>One small action to start or recover a task.</span></p>
           <p><strong>Break Down</strong><span>Splits a task into short steps.</span></p>
           <p><strong>Last Light</strong><span>Emergency mode when time is tight.</span></p>
           <p><strong>Planner</strong><span>Ranks tasks and builds calendar-ready focus blocks.</span></p>
           <p><strong>Habits</strong><span>Tracks repeatable actions like study or applications.</span></p>
+          <p><strong>Voice reminders</strong><span>When enabled, Flicker speaks urgent reminders out loud.</span></p>
           <p><strong>Notifications</strong><span>Alerts for urgent tasks and reminder check-ins while Flicker is open.</span></p>
           <p><strong>Send a Flare</strong><span>Ask a friend to volunteer for focus, review, reminders, or an allowed shared subtask.</span></p>
         </div>

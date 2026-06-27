@@ -16,6 +16,7 @@ const darkModeKey = 'flicker-night-mode-v1';
 const voiceKey = 'flicker-voice-name-v1';
 const humanVoiceKey = 'flicker-human-voice-v1';
 let activeHumanAudio = null;
+let speechSequence = 0;
 const flareHelp = {
   'Focus sprint': 'Your friend agrees to work alongside you for a short focused session.',
   'Review / unblock': 'Your friend helps check, explain, or unblock the task. They are not doing dishonest work for you.',
@@ -169,6 +170,11 @@ function showBrowserNotification(title, body) {
 
 function browserSpeak(text, enabled = true) {
   if (!enabled || !canSpeak()) return;
+  if (activeHumanAudio) {
+    activeHumanAudio.pause();
+    URL.revokeObjectURL(activeHumanAudio.src);
+    activeHumanAudio = null;
+  }
   window.speechSynthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(text);
   const preferredVoice = getPreferredVoice();
@@ -180,9 +186,15 @@ function browserSpeak(text, enabled = true) {
   window.speechSynthesis.speak(utterance);
 }
 
-async function playHumanVoice(text) {
+async function playHumanVoice(text, sequence) {
   const token = localStorage.getItem(tokenKey);
   if (!token) throw new Error('Missing token for human voice.');
+  if (canSpeak()) window.speechSynthesis.cancel();
+  if (activeHumanAudio) {
+    activeHumanAudio.pause();
+    URL.revokeObjectURL(activeHumanAudio.src);
+    activeHumanAudio = null;
+  }
 
   const response = await fetch(`${apiBase}/api/ai/tts`, {
     method: 'POST',
@@ -195,6 +207,7 @@ async function playHumanVoice(text) {
   if (!response.ok) throw new Error('Human voice unavailable.');
 
   const blob = await response.blob();
+  if (sequence !== speechSequence) return;
   const url = URL.createObjectURL(blob);
   if (activeHumanAudio) {
     activeHumanAudio.pause();
@@ -207,11 +220,22 @@ async function playHumanVoice(text) {
 
 function speak(text, enabled = true) {
   if (!enabled) return;
+  speechSequence += 1;
+  const sequence = speechSequence;
   if (localStorage.getItem(humanVoiceKey) === 'true') {
-    playHumanVoice(text).catch(() => browserSpeak(text, true));
+    playHumanVoice(text, sequence).catch(() => {
+      if (sequence === speechSequence) browserSpeak(text, true);
+    });
     return;
   }
   browserSpeak(text, true);
+}
+
+function canStartAutoSpeech(lastSpokenRef, nowMs, cooldownMs = 12000) {
+  const lastAutoSpeech = lastSpokenRef.current.get('__auto__') || 0;
+  if (nowMs - lastAutoSpeech < cooldownMs) return false;
+  lastSpokenRef.current.set('__auto__', nowMs);
+  return true;
 }
 
 function roast(category, enabled) {
@@ -494,7 +518,7 @@ function App() {
         const missedKey = `speak-${task.id}-Missed`;
         if (!spokenStageRef.current.has(missedKey)) {
           spokenStageRef.current.add(missedKey);
-          roast('missed', true);
+          if (canStartAutoSpeech(lastSpokenRef, nowMs)) roast('missed', true);
         }
         continue;
       }
@@ -507,6 +531,7 @@ function App() {
       if (!spokenStageRef.current.has(stageKey)) {
         spokenStageRef.current.add(stageKey);
         lastSpokenRef.current.set(task.id, nowMs);
+        if (!canStartAutoSpeech(lastSpokenRef, nowMs)) continue;
         if (roastEnabled) {
           const category = task.heat.label === 'Last Light' ? 'lastLight' : task.heat.label.toLowerCase();
           roast(category, true);
@@ -523,6 +548,7 @@ function App() {
       const lastSpoken = lastSpokenRef.current.get(task.id) || 0;
       if (nowMs - lastSpoken >= repeatMs) {
         lastSpokenRef.current.set(task.id, nowMs);
+        if (!canStartAutoSpeech(lastSpokenRef, nowMs)) continue;
         if (roastEnabled) {
           roast(task.heat.label === 'Last Light' ? 'lastLight' : 'critical', true);
         } else {

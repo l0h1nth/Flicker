@@ -1,8 +1,9 @@
 /*
-  Voice reminder upgrade:
-  - Splits browser notifications from speech so voice works without notification permission.
-  - Adds stage-aware reminder scripts, repeated Critical/Last Light speech, and Action Lock voice milestones.
-  - Adds voice status/test/read-aloud UI plus Last Light countdown and pulsing heat badges.
+  CHANGES:
+  - Added client-persistent Fun Mode with roast voice lines and optional chaos styling.
+  - Kept normal/professional mode intact while upgrading voice alerts, missed-task roasts, and Action Lock milestones.
+  - Added Rescue/Chaos Points, voice status/test polish, Daily Signal read-aloud, confetti, and activity timeline styling hooks.
+  - Preserved all existing API calls and backend compatibility; no server or package changes required.
 */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -10,11 +11,59 @@ import './styles.css';
 
 const apiBase = import.meta.env.VITE_API_BASE || '';
 const tokenKey = 'flicker-token-v2';
+const funModeKey = 'flicker-fun-mode-v1';
 const flareHelp = {
   'Focus sprint': 'Your friend agrees to work alongside you for a short focused session.',
   'Review / unblock': 'Your friend helps check, explain, or unblock the task. They are not doing dishonest work for you.',
   'Reminder check-in': 'Your friend manually checks on you later so the task does not disappear.',
   'Take over allowed subtask': 'Use this only for shared or appropriate tasks, like booking, pickup, formatting, or admin work.'
+};
+
+const ROAST_LINES = {
+  warming: [
+    "Hey genius, this task isn't going to do itself.",
+    'Still ignoring it? Bold strategy.',
+    "The deadline called. It's concerned."
+  ],
+  hot: [
+    'You are cooked. Mildly. For now.',
+    'Your procrastination is becoming a personality.',
+    "Clock's ticking and you're... what exactly?",
+    'This task filed a missing person report on you.'
+  ],
+  critical: [
+    "Okay we are in the danger zone and you still haven't started. Classic.",
+    "Your deadline is laughing at you. It's not a good laugh.",
+    'Bold of you to assume this will sort itself out.',
+    'You are the reason procrastination has a Wikipedia page.'
+  ],
+  lastLight: [
+    'This is genuinely impressive levels of waiting until the last second.',
+    'Future you is going to have WORDS with current you.',
+    'There are five stages of grief and you are speed-running all of them.',
+    'The audacity to still be calm right now is actually insane.',
+    'I have seen disasters unfold slower than this deadline approaching.'
+  ],
+  missed: [
+    "You missed it. I'm not mad. I'm disappointed. Actually I'm a little mad.",
+    'Congrats on the new skill: deadline archaeology.',
+    'The deadline left. It took your hopes with it.',
+    'This is going in the hall of fame of unfortunate choices.'
+  ],
+  actionLockStart: [
+    'Okay okay okay. We are doing this NOW.',
+    'Finally. The task was starting to think you forgot its name.',
+    'Hero arc begins. Possibly.'
+  ],
+  actionLockEnd: [
+    "That's it. Was that so hard? Don't answer that.",
+    'Timer done. Update your progress before you forget and we have to do this again.',
+    'You survived. Barely.'
+  ],
+  snooze: [
+    'Snoozing. Again. The timeline is not in your favour.',
+    'Each snooze is a little betrayal of future you.'
+  ]
 };
 
 function soon(hours) {
@@ -83,6 +132,13 @@ function speak(text, enabled = true) {
   window.speechSynthesis.speak(utterance);
 }
 
+function roast(category, enabled) {
+  if (!enabled) return;
+  const lines = ROAST_LINES[category] || [];
+  const line = lines[Math.floor(Math.random() * lines.length)];
+  if (line) speak(line, true);
+}
+
 function voiceScriptFor(task) {
   const left = timeLeft(task.heat.minutesLeft);
   if (task.heat.label === 'Warming') {
@@ -109,6 +165,21 @@ function briefSpeechText(briefData) {
     .filter(Boolean)
     .join('. ')
     .replace(/<[^>]*>/g, '');
+}
+
+function fireConfetti() {
+  if (typeof document === 'undefined') return;
+  const colors = ['#ff4d6d', '#ff8c42', '#7c5cff', '#22d3ee', '#22c55e'];
+  for (let index = 0; index < 20; index += 1) {
+    const piece = document.createElement('div');
+    piece.className = 'confetti-piece';
+    piece.style.left = `${45 + Math.random() * 10}%`;
+    piece.style.background = colors[index % colors.length];
+    piece.style.setProperty('--tx', `${Math.random() * 240 - 120}px`);
+    piece.style.setProperty('--rot', `${Math.random() * 720 - 360}deg`);
+    document.body.appendChild(piece);
+    setTimeout(() => piece.remove(), 2000);
+  }
 }
 
 function toLocalInputValue(isoString) {
@@ -184,6 +255,7 @@ function App() {
   const [error, setError] = useState('');
   const [guideOpen, setGuideOpen] = useState(false);
   const [actionTask, setActionTask] = useState(null);
+  const [funMode, setFunModeState] = useState(() => localStorage.getItem(funModeKey) === 'true');
   const [notificationsEnabled, setNotificationsEnabled] = useState(canNotify() && Notification.permission === 'granted');
   const notifiedRef = useRef(new Set());
   const spokenStageRef = useRef(new Set());
@@ -200,6 +272,11 @@ function App() {
   const completedTasks = useMemo(() => (dashboard?.completedTasks || []).map(normalizeTask), [dashboard]);
   const lastLight = liveTasks.find((task) => task.heat.label === 'Last Light');
 
+  function setFunMode(nextValue) {
+    setFunModeState(nextValue);
+    localStorage.setItem(funModeKey, String(nextValue));
+  }
+
   useEffect(() => {
     if (!token) return undefined;
     refresh(true);
@@ -207,7 +284,7 @@ function App() {
       refresh(true);
     }, 3500);
     return () => clearInterval(timer);
-  }, [token]);
+  }, [token, funMode]);
 
   useEffect(() => {
     latestDashboardRef.current = dashboard;
@@ -218,11 +295,11 @@ function App() {
     voiceIntervalRef.current = setInterval(() => {
       const current = latestDashboardRef.current;
       if (current?.user?.voiceReminders) {
-        maybeSpeak(current, true, true);
+        maybeSpeak(current, true, funMode, true);
       }
     }, 60000);
     return () => clearInterval(voiceIntervalRef.current);
-  }, [token]);
+  }, [token, funMode]);
 
   async function api(path, options = {}) {
     const response = await fetch(`${apiBase}${path}`, {
@@ -253,55 +330,71 @@ function App() {
   async function refresh(silent = false) {
     await run('Loading Flicker', async () => {
       const data = await api('/api/dashboard');
-      maybeNotify(data);
-      maybeSpeak(data, data.user?.voiceReminders, false);
+      maybeNotify(data, data.user?.voiceReminders, funMode);
       setDashboard(data);
     }, silent);
   }
 
-  function maybeNotify(data) {
+  function maybeNotify(data, voiceEnabled = false, roastEnabled = false) {
     if (!dashboardReadyRef.current) {
       dashboardReadyRef.current = true;
       return;
     }
-    if (!canNotify() || Notification.permission !== 'granted') return;
 
-    for (const request of data.incomingHelpRequests || []) {
-      const key = `flare-${request.id}-${request.status}`;
-      if (request.status === 'pending' && !notifiedRef.current.has(key)) {
-        notifiedRef.current.add(key);
-        showBrowserNotification(
-          request.kind === 'Reminder check-in' ? 'Reminder check-in request' : 'New Flare request',
-          `@${request.ownerUsername} needs ${request.kind} for "${request.taskTitle}".`
-        );
-        speak(`Flicker check-in. ${request.ownerUsername} needs ${request.kind} for ${request.taskTitle}.`, voiceEnabled);
+    if (canNotify() && Notification.permission === 'granted') {
+      for (const request of data.incomingHelpRequests || []) {
+        const key = `flare-${request.id}-${request.status}`;
+        if (request.status === 'pending' && !notifiedRef.current.has(key)) {
+          notifiedRef.current.add(key);
+          showBrowserNotification(
+            request.kind === 'Reminder check-in' ? 'Reminder check-in request' : 'New Flare request',
+            `@${request.ownerUsername} needs ${request.kind} for "${request.taskTitle}".`
+          );
+          speak(`Flicker check-in. ${request.ownerUsername} needs ${request.kind} for ${request.taskTitle}.`, voiceEnabled);
+        }
+      }
+
+      for (const task of (data.liveTasks || []).map(normalizeTask)) {
+        const key = `notif-${task.id}-${task.heat.label}`;
+        if (task.heat.minutesLeft >= 0 && task.heat.level >= 4 && !notifiedRef.current.has(key)) {
+          notifiedRef.current.add(key);
+          showBrowserNotification('Task needs action', `"${task.title}" has ${timeLeft(task.heat.minutesLeft)}.`);
+        }
       }
     }
 
-    for (const task of (data.liveTasks || []).map(normalizeTask)) {
-      const key = `urgent-${task.id}-${task.heat.label}`;
-      if (task.heat.level >= 2 && task.heat.minutesLeft >= 0 && !notifiedRef.current.has(key)) {
-        notifiedRef.current.add(key);
-        showBrowserNotification(`${task.heat.label}: ${task.title}`, timeLeft(task.heat.minutesLeft));
-      }
-    }
+    maybeSpeak(data, voiceEnabled, roastEnabled, false);
   }
 
-  function maybeSpeak(data, voiceEnabled = false, allowRepeats = false) {
+  function maybeSpeak(data, voiceEnabled = false, roastEnabled = false, allowRepeats = false) {
     if (!voiceEnabled || !canSpeak()) return;
     const nowMs = Date.now();
 
     for (const task of (data.liveTasks || []).map(normalizeTask)) {
-      if (task.heat.level < 2 || task.heat.minutesLeft < 0 || actionLockStartedRef.current.has(task.id)) continue;
+      if (actionLockStartedRef.current.has(task.id)) continue;
+      if (task.heat.label === 'Missed' && roastEnabled) {
+        const missedKey = `speak-${task.id}-Missed`;
+        if (!spokenStageRef.current.has(missedKey)) {
+          spokenStageRef.current.add(missedKey);
+          roast('missed', true);
+        }
+        continue;
+      }
+      if (task.heat.level < 2 || task.heat.minutesLeft < 0) continue;
 
-      const stageKey = `urgent-${task.id}-${task.heat.label}`;
+      const stageKey = `speak-${task.id}-${task.heat.label}`;
       const script = voiceScriptFor(task);
       if (!script) continue;
 
       if (!spokenStageRef.current.has(stageKey)) {
         spokenStageRef.current.add(stageKey);
         lastSpokenRef.current.set(task.id, nowMs);
-        speak(script, true);
+        if (roastEnabled) {
+          const category = task.heat.label === 'Last Light' ? 'lastLight' : task.heat.label.toLowerCase();
+          roast(category, true);
+        } else {
+          speak(script, true);
+        }
         continue;
       }
 
@@ -312,7 +405,11 @@ function App() {
       const lastSpoken = lastSpokenRef.current.get(task.id) || 0;
       if (nowMs - lastSpoken >= repeatMs) {
         lastSpokenRef.current.set(task.id, nowMs);
-        speak(script, true);
+        if (roastEnabled) {
+          roast(task.heat.label === 'Last Light' ? 'lastLight' : 'critical', true);
+        } else {
+          speak(script, true);
+        }
       }
     }
   }
@@ -383,6 +480,7 @@ function App() {
       const data = await api(`/api/tasks/${task.id}/complete`, { method: 'POST' });
       setDashboard(data);
       setTab('finished');
+      if (funMode) fireConfetti();
       setPanel({
         title: 'Moved to Finished',
         body: `"${task.title}" is no longer on your live board. Clean board, clean brain.`
@@ -394,13 +492,14 @@ function App() {
     await run('Creating daily signal', async () => {
       const data = await api('/api/ai/brief', { method: 'POST' });
       setBrief(data);
-      setPanel({ title: data.headline, lines: data.lines, body: data.firstMove, note: data.note, offline: data.offline, modelUsed: data.modelUsed });
-      speak(briefSpeechText(data), dashboard?.user?.voiceReminders);
+      const speechText = `${funMode ? 'Alright, pay attention: ' : ''}${briefSpeechText(data)}`;
+      setPanel({ title: data.headline, lines: data.lines, body: data.firstMove, note: data.note, offline: data.offline, modelUsed: data.modelUsed, speechText });
+      speak(speechText, dashboard?.user?.voiceReminders);
     });
   }
 
   function readBriefAloud() {
-    if (brief) speak(briefSpeechText(brief), true);
+    if (brief) speak(`${funMode ? 'Alright, pay attention: ' : ''}${briefSpeechText(brief)}`, true);
   }
 
   function openActionLock(task) {
@@ -528,7 +627,7 @@ function App() {
   }
 
   return (
-    <main className={lastLight ? 'app alert' : 'app'}>
+    <main className={`${lastLight ? 'app alert' : 'app'}${funMode ? ' fun-mode' : ''}`}>
       {!dashboard.user.tutorialSeen && <Tutorial onDone={() => patchProfile({ tutorialSeen: true })} />}
       {guideOpen && <GuideModal onClose={() => setGuideOpen(false)} />}
       {actionTask && (
@@ -536,6 +635,7 @@ function App() {
           task={actionTask}
           friends={dashboard.friends}
           voiceEnabled={dashboard.user.voiceReminders}
+          funMode={funMode}
           aiAction={aiAction}
           updateTask={updateTask}
           completeTask={completeTask}
@@ -548,7 +648,10 @@ function App() {
         <div>
           <p className="eyebrow">AI deadline rescue</p>
           <h1>Flicker</h1>
-          <p>Welcome, @{dashboard.user.username}. Keep live work simple. Move done work out of the way.</p>
+          <p>
+            Welcome, @{dashboard.user.username}.{' '}
+            <span className="score-chip">{funMode ? '🔥 Chaos Points' : '⚡ Rescue Points'}: {dashboard.user.rescuePoints || 0}</span>
+          </p>
         </div>
         <div className="top-actions">
           <button className="help-chip" onClick={() => setGuideOpen(true)} title="Open guide">?</button>
@@ -572,10 +675,13 @@ function App() {
             />
             Voice reminders
           </label>
-          <button className="secondary" onClick={() => speak('Flicker voice is active. You will hear alerts like this when deadlines approach.', true)}>
-            Test voice
+          <button className="secondary" onClick={() => speak(funMode ? "I'm watching you. The deadlines are watching you. We're all watching." : 'Flicker voice is active. Deadline rescue standing by.', true)}>
+            Test 🔊
           </button>
-          <VoiceStatus enabled={dashboard.user.voiceReminders} />
+          <VoiceStatus enabled={dashboard.user.voiceReminders} funMode={funMode} />
+          <button className={funMode ? 'fun-toggle active' : 'fun-toggle'} onClick={() => setFunMode(!funMode)}>
+            {funMode ? '🔥 ROAST MODE ON' : '🎭 Fun Mode'}
+          </button>
           <span className={dashboard.ai?.configured ? 'ai-status live' : 'ai-status'}>
             {dashboard.ai?.configured ? 'Gemini on' : 'Fallback AI'}
           </span>
@@ -635,6 +741,7 @@ function App() {
               tasks={liveTasks}
               friends={dashboard.friends}
               brief={brief}
+              funMode={funMode}
               readBriefAloud={readBriefAloud}
               createTask={createTask}
               updateTask={updateTask}
@@ -742,12 +849,13 @@ function Tutorial({ onDone }) {
   );
 }
 
-function VoiceStatus({ enabled }) {
-  if (!canSpeak()) return <span className="voice-status unavailable">⚠️ Voice unavailable</span>;
+function VoiceStatus({ enabled, funMode }) {
+  if (!canSpeak()) return <span className="voice-status unavailable">⚠️ No audio</span>;
+  if (enabled && funMode) return <span className="voice-status roast">🔥 Roast mode</span>;
   return enabled ? <span className="voice-status on">🔊 Voice on</span> : <span className="voice-status off">🔇 Voice off</span>;
 }
 
-function LivePage({ tasks, friends, brief, readBriefAloud, createTask, updateTask, completeTask, aiAction, sendFlare, parseVoice, startActionLock }) {
+function LivePage({ tasks, friends, brief, funMode, readBriefAloud, createTask, updateTask, completeTask, aiAction, sendFlare, parseVoice, startActionLock }) {
   return (
     <div className="stack">
       <section className="card signal">
@@ -761,7 +869,10 @@ function LivePage({ tasks, friends, brief, readBriefAloud, createTask, updateTas
       <TaskForm createTask={createTask} parseVoice={parseVoice} />
       <section className="stack">
         {tasks.length === 0 ? (
-          <Empty title="No live tasks" body="Add one task, then use Smart Nudge or send a Flare if you get stuck." />
+          <Empty
+            title={funMode ? 'Nothing is on fire yet. Suspicious.' : "Nothing's on fire yet. 🔥"}
+            body={funMode ? "You've achieved inbox zero by having nothing due. Suspicious." : 'Add a task before that changes.'}
+          />
         ) : (
           tasks.map((task) => (
             <TaskCard
@@ -773,6 +884,7 @@ function LivePage({ tasks, friends, brief, readBriefAloud, createTask, updateTas
               aiAction={aiAction}
               sendFlare={sendFlare}
               startActionLock={startActionLock}
+              funMode={funMode}
             />
           ))
         )}
@@ -871,7 +983,7 @@ function TaskForm({ createTask, parseVoice }) {
   );
 }
 
-function TaskCard({ task, friends, updateTask, completeTask, aiAction, sendFlare, startActionLock }) {
+function TaskCard({ task, friends, updateTask, completeTask, aiAction, sendFlare, startActionLock, funMode }) {
   const [friendId, setFriendId] = useState('');
   const [kind, setKind] = useState('Focus sprint');
   const [message, setMessage] = useState('');
@@ -903,7 +1015,8 @@ function TaskCard({ task, friends, updateTask, completeTask, aiAction, sendFlare
         <div>
           <span className={`heat ${task.heat.className}`}>{task.heat.label}</span>
           {task.role === 'helper' && <span className="shared-pill">Shared by @{task.owner_username}</span>}
-          <h3>{task.title}</h3>
+          {funMode && task.heat.label === 'Missed' && <span className="roast-badge">💀 Hall of fame</span>}
+          <h3>{funMode && task.heat.label === 'Missed' ? `💀 ${task.title}` : task.title}</h3>
           <p>
             {task.category} · <span className={task.heat.label === 'Last Light' && countdownSeconds < 30 * 60 ? 'countdown-danger' : ''}>{timeDisplay}</span> · {task.effortMinutes} min
             {task.support_kind ? ` · ${task.support_kind}` : ''}
@@ -975,17 +1088,27 @@ function TaskCard({ task, friends, updateTask, completeTask, aiAction, sendFlare
   );
 }
 
-function ActionLock({ task, friends, voiceEnabled, aiAction, updateTask, completeTask, sendFlare, onClose }) {
+function ActionLock({ task, friends, voiceEnabled, funMode, aiAction, updateTask, completeTask, sendFlare, onClose }) {
   const [secondsLeft, setSecondsLeft] = useState(12 * 60);
   const [running, setRunning] = useState(false);
   const [friendId, setFriendId] = useState(friends[0]?.id || '');
   const [blocker, setBlocker] = useState('');
+  const [roastQuote, setRoastQuote] = useState(ROAST_LINES.critical[0]);
   const spokenMilestonesRef = useRef(new Set());
   const nextProgress = Math.min(100, Number(task.progress || 0) + 20);
 
   useEffect(() => {
-    speak(`Action lock for ${task.title}. Stay focused for ${Math.min(task.effortMinutes || 30, 25)} minutes. Close all distractions.`, voiceEnabled);
-  }, []);
+    if (funMode) roast('actionLockStart', voiceEnabled);
+    else speak(`Action lock for ${task.title}. Stay focused for ${Math.min(task.effortMinutes || 30, 25)} minutes. Close all distractions.`, voiceEnabled);
+  }, [funMode, task.title, task.effortMinutes, voiceEnabled]);
+
+  useEffect(() => {
+    if (!funMode) return undefined;
+    const timer = setInterval(() => {
+      setRoastQuote(ROAST_LINES.critical[Math.floor(Math.random() * ROAST_LINES.critical.length)]);
+    }, 30000);
+    return () => clearInterval(timer);
+  }, [funMode]);
 
   useEffect(() => {
     if (!running || secondsLeft <= 0) return undefined;
@@ -994,25 +1117,28 @@ function ActionLock({ task, friends, voiceEnabled, aiAction, updateTask, complet
   }, [running, secondsLeft]);
 
   useEffect(() => {
-    if (secondsLeft === 0) {
-      speak(`Time's up. How much progress did you make on ${task.title}? Update it now.`, voiceEnabled);
+    if (!running) return;
+    if (secondsLeft === 5 * 60 && !spokenMilestonesRef.current.has('5min')) {
+      spokenMilestonesRef.current.add('5min');
+      if (funMode) speak('Five minutes left. The roast is almost ready.', voiceEnabled);
+      else speak(`5 minutes left in your action lock for ${task.title}. Keep going.`, voiceEnabled);
     }
-  }, [secondsLeft]);
-
-  useEffect(() => {
-    if (!voiceEnabled) return;
-    if (secondsLeft <= 300 && secondsLeft > 240 && !spokenMilestonesRef.current.has('5m')) {
-      spokenMilestonesRef.current.add('5m');
-      speak(`5 minutes left in your action lock for ${task.title}. Keep going.`, true);
+    if (secondsLeft === 60 && !spokenMilestonesRef.current.has('1min')) {
+      spokenMilestonesRef.current.add('1min');
+      if (funMode) speak('One minute left. Wrap it up or explain yourself.', voiceEnabled);
+      else speak('1 minute left. Wrap up and note where you stopped.', voiceEnabled);
     }
-    if (secondsLeft <= 60 && secondsLeft > 0 && !spokenMilestonesRef.current.has('1m')) {
-      spokenMilestonesRef.current.add('1m');
-      speak('1 minute left. Wrap up and note where you stopped.', true);
+    if (secondsLeft === 0 && !spokenMilestonesRef.current.has('done')) {
+      spokenMilestonesRef.current.add('done');
+      if (funMode) roast('actionLockEnd', voiceEnabled);
+      else speak(`Time's up. Update your progress on ${task.title} right now.`, voiceEnabled);
     }
-  }, [secondsLeft, voiceEnabled, task.title]);
+  }, [secondsLeft, running, funMode, voiceEnabled, task.title]);
 
   const minutes = Math.floor(secondsLeft / 60);
   const seconds = String(secondsLeft % 60).padStart(2, '0');
+  const progress = ((12 * 60 - secondsLeft) / (12 * 60)) * 283;
+  const ringColor = secondsLeft <= 180 ? 'var(--red)' : secondsLeft <= 480 ? 'var(--yellow)' : 'var(--green)';
   const snoozeTime = new Date(Date.now() + 30 * 60000);
   const finishTime = new Date(snoozeTime.getTime() + Number(task.effortMinutes || 30) * 60000);
 
@@ -1049,14 +1175,21 @@ function ActionLock({ task, friends, voiceEnabled, aiAction, updateTask, complet
           <button className="secondary" onClick={onClose}>Exit</button>
         </div>
 
-        <div className="lock-timer">{minutes}:{seconds}</div>
+        <div className="lock-timer-wrap">
+          <svg className="lock-ring" viewBox="0 0 120 120" aria-hidden="true">
+            <circle className="lock-ring-bg" cx="60" cy="60" r="45" />
+            <circle className="lock-ring-fg" cx="60" cy="60" r="45" style={{ strokeDashoffset: 283 - progress, stroke: ringColor }} />
+          </svg>
+          <div className={`lock-timer ${secondsLeft <= 180 ? 'danger' : secondsLeft <= 480 ? 'warn' : 'safe'}`}>{minutes}:{seconds}</div>
+        </div>
+        {funMode && <p className="roast-quote">{roastQuote}</p>}
         <p className="lock-copy">No full planning now. Do one visible action, then update progress.</p>
 
         <div className="button-row">
           <button onClick={() => setRunning(true)}>Start</button>
           <button className="secondary" onClick={() => setRunning(false)}>Pause</button>
-          <button className="secondary" onClick={saveProgress}>I made progress</button>
-          <button className="secondary" onClick={() => completeTask(task)}>Complete task</button>
+          <button className="secondary" onClick={saveProgress}>{funMode ? 'I survived 💪' : 'I made progress'}</button>
+          <button className="secondary" onClick={() => completeTask(task)}>{funMode ? "IT'S DONE 🎉" : 'Complete task'}</button>
         </div>
 
         <section className="lock-section">
@@ -1340,6 +1473,7 @@ function AiPanel({ panel }) {
           {panel.offline && <span className="status rejected">Fallback used</span>}
           {panel.modelUsed && <span className="status accepted">Gemini: {panel.modelUsed}</span>}
           {panel.body && <p>{panel.body}</p>}
+          {panel.speechText && <button className="read-aloud ai-read" onClick={() => speak(panel.speechText, true)}>🔊 Read aloud</button>}
           {panel.lines?.map((line) => <p className="muted" key={line}>{line}</p>)}
           {panel.steps?.map((step) => <p className="muted" key={step.title}>{step.title} · {step.minutes} min</p>)}
           {panel.note && <p className="preview">{panel.note}</p>}
@@ -1378,11 +1512,19 @@ function GuideModal({ onClose }) {
 }
 
 function Activity({ activity }) {
+  function activityTone(message = '') {
+    const lower = message.toLowerCase();
+    if (lower.includes('completed') || lower.includes('done')) return 'good';
+    if (lower.includes('missed')) return 'bad';
+    if (lower.includes('flare') || lower.includes('help')) return 'info';
+    return 'warn';
+  }
+
   return (
     <section className="card">
       <p className="eyebrow">Activity</p>
       {activity.length === 0 ? <p className="muted">No activity yet.</p> : activity.map((item) => (
-        <p className="activity" key={item.id}>{item.message}</p>
+        <p className={`activity ${activityTone(item.message)}`} key={item.id}>{item.message}</p>
       ))}
     </section>
   );

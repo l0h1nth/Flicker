@@ -184,6 +184,40 @@ label {
   width: auto;
 }
 
+.voice-status {
+  align-self: end;
+  border-radius: 999px;
+  background: #f1e9e2;
+  color: var(--muted);
+  padding: 0.52rem 0.72rem;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.voice-status.on {
+  position: relative;
+  background: #e8f7ef;
+  color: var(--green);
+  padding-right: 1.6rem;
+}
+
+.voice-status.on::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 0.65rem;
+  width: 0.48rem;
+  height: 0.48rem;
+  border-radius: 999px;
+  background: var(--green);
+  transform: translateY(-50%);
+}
+
+.voice-status.unavailable {
+  background: #fff0e8;
+  color: var(--accent-dark);
+}
+
 .eyebrow {
   margin: 0 0 0.5rem;
   color: var(--accent-dark);
@@ -289,6 +323,12 @@ label {
   margin: 0;
 }
 
+.read-aloud {
+  background: rgba(255, 255, 255, 0.14);
+  color: white;
+  margin-top: 0.8rem;
+}
+
 .form {
   display: grid;
   gap: 0.75rem;
@@ -373,6 +413,29 @@ label {
 .status.accepted {
   background: #e8f7ef;
   color: var(--green);
+}
+
+@keyframes heatPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(240, 90, 51, 0.42);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(240, 90, 51, 0);
+  }
+}
+
+.heat.critical {
+  animation: heatPulse 1.5s infinite;
+}
+
+.heat.last {
+  animation: heatPulse 0.8s infinite;
+}
+
+.countdown-danger {
+  color: var(--red);
+  font-weight: 900;
 }
 
 .status.rejected {

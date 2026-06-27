@@ -1,3 +1,9 @@
+/*
+  Voice reminder upgrade:
+  - Splits browser notifications from speech so voice works without notification permission.
+  - Adds stage-aware reminder scripts, repeated Critical/Last Light speech, and Action Lock voice milestones.
+  - Adds voice status/test/read-aloud UI plus Last Light countdown and pulsing heat badges.
+*/
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
@@ -55,6 +61,10 @@ function canNotify() {
   return typeof window !== 'undefined' && 'Notification' in window;
 }
 
+function canSpeak() {
+  return typeof window !== 'undefined' && 'speechSynthesis' in window;
+}
+
 function showBrowserNotification(title, body) {
   if (!canNotify() || Notification.permission !== 'granted') return;
   new Notification(title, {
@@ -65,12 +75,40 @@ function showBrowserNotification(title, body) {
 }
 
 function speak(text, enabled = true) {
-  if (!enabled || typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+  if (!enabled || !canSpeak()) return;
   window.speechSynthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.rate = 0.95;
   utterance.pitch = 1;
   window.speechSynthesis.speak(utterance);
+}
+
+function voiceScriptFor(task) {
+  const left = timeLeft(task.heat.minutesLeft);
+  if (task.heat.label === 'Warming') {
+    return `Heads up. ${task.title} is warming up. You have ${left} — consider planning your next step.`;
+  }
+  if (task.heat.label === 'Hot') {
+    return `Warning. ${task.title} is getting hot. Only ${left} remaining. Open it now.`;
+  }
+  if (task.heat.label === 'Critical') {
+    return `Critical alert. ${task.title} needs your attention right now. ${left} left. Start an action lock immediately.`;
+  }
+  if (task.heat.label === 'Last Light') {
+    return `Emergency. ${task.title} is in last light. You have ${left}. This is your final window. Go now.`;
+  }
+  return '';
+}
+
+function briefSpeechText(briefData) {
+  return [
+    briefData?.headline,
+    ...(briefData?.lines || []),
+    briefData?.firstMove
+  ]
+    .filter(Boolean)
+    .join('. ')
+    .replace(/<[^>]*>/g, '');
 }
 
 function toLocalInputValue(isoString) {
@@ -148,6 +186,11 @@ function App() {
   const [actionTask, setActionTask] = useState(null);
   const [notificationsEnabled, setNotificationsEnabled] = useState(canNotify() && Notification.permission === 'granted');
   const notifiedRef = useRef(new Set());
+  const spokenStageRef = useRef(new Set());
+  const lastSpokenRef = useRef(new Map());
+  const actionLockStartedRef = useRef(new Set());
+  const latestDashboardRef = useRef(null);
+  const voiceIntervalRef = useRef(null);
   const dashboardReadyRef = useRef(false);
 
   const liveTasks = useMemo(
@@ -164,6 +207,21 @@ function App() {
       refresh(true);
     }, 3500);
     return () => clearInterval(timer);
+  }, [token]);
+
+  useEffect(() => {
+    latestDashboardRef.current = dashboard;
+  }, [dashboard]);
+
+  useEffect(() => {
+    if (!token) return undefined;
+    voiceIntervalRef.current = setInterval(() => {
+      const current = latestDashboardRef.current;
+      if (current?.user?.voiceReminders) {
+        maybeSpeak(current, true, true);
+      }
+    }, 60000);
+    return () => clearInterval(voiceIntervalRef.current);
   }, [token]);
 
   async function api(path, options = {}) {
@@ -195,12 +253,13 @@ function App() {
   async function refresh(silent = false) {
     await run('Loading Flicker', async () => {
       const data = await api('/api/dashboard');
-      maybeNotify(data, dashboard?.user?.voiceReminders);
+      maybeNotify(data);
+      maybeSpeak(data, data.user?.voiceReminders, false);
       setDashboard(data);
     }, silent);
   }
 
-  function maybeNotify(data, voiceEnabled = false) {
+  function maybeNotify(data) {
     if (!dashboardReadyRef.current) {
       dashboardReadyRef.current = true;
       return;
@@ -220,11 +279,40 @@ function App() {
     }
 
     for (const task of (data.liveTasks || []).map(normalizeTask)) {
-      const key = `urgent-${task.id}`;
-      if (task.heat.minutesLeft >= 0 && task.heat.minutesLeft <= 120 && !notifiedRef.current.has(key)) {
+      const key = `urgent-${task.id}-${task.heat.label}`;
+      if (task.heat.level >= 2 && task.heat.minutesLeft >= 0 && !notifiedRef.current.has(key)) {
         notifiedRef.current.add(key);
-        showBrowserNotification('Task needs action', `"${task.title}" has ${timeLeft(task.heat.minutesLeft)}.`);
-        speak(`Flicker reminder. ${task.title} has ${timeLeft(task.heat.minutesLeft)}. Start an action lock now.`, voiceEnabled);
+        showBrowserNotification(`${task.heat.label}: ${task.title}`, timeLeft(task.heat.minutesLeft));
+      }
+    }
+  }
+
+  function maybeSpeak(data, voiceEnabled = false, allowRepeats = false) {
+    if (!voiceEnabled || !canSpeak()) return;
+    const nowMs = Date.now();
+
+    for (const task of (data.liveTasks || []).map(normalizeTask)) {
+      if (task.heat.level < 2 || task.heat.minutesLeft < 0 || actionLockStartedRef.current.has(task.id)) continue;
+
+      const stageKey = `urgent-${task.id}-${task.heat.label}`;
+      const script = voiceScriptFor(task);
+      if (!script) continue;
+
+      if (!spokenStageRef.current.has(stageKey)) {
+        spokenStageRef.current.add(stageKey);
+        lastSpokenRef.current.set(task.id, nowMs);
+        speak(script, true);
+        continue;
+      }
+
+      if (!allowRepeats) continue;
+      const repeatMs = task.heat.label === 'Last Light' ? 20 * 60 * 1000 : task.heat.label === 'Critical' ? 45 * 60 * 1000 : 0;
+      if (!repeatMs) continue;
+
+      const lastSpoken = lastSpokenRef.current.get(task.id) || 0;
+      if (nowMs - lastSpoken >= repeatMs) {
+        lastSpokenRef.current.set(task.id, nowMs);
+        speak(script, true);
       }
     }
   }
@@ -307,7 +395,17 @@ function App() {
       const data = await api('/api/ai/brief', { method: 'POST' });
       setBrief(data);
       setPanel({ title: data.headline, lines: data.lines, body: data.firstMove, note: data.note, offline: data.offline, modelUsed: data.modelUsed });
+      speak(briefSpeechText(data), dashboard?.user?.voiceReminders);
     });
+  }
+
+  function readBriefAloud() {
+    if (brief) speak(briefSpeechText(brief), true);
+  }
+
+  function openActionLock(task) {
+    actionLockStartedRef.current.add(task.id);
+    setActionTask(task);
   }
 
   async function aiAction(type, task) {
@@ -474,6 +572,10 @@ function App() {
             />
             Voice reminders
           </label>
+          <button className="secondary" onClick={() => speak('Flicker voice is active. You will hear alerts like this when deadlines approach.', true)}>
+            Test voice
+          </button>
+          <VoiceStatus enabled={dashboard.user.voiceReminders} />
           <span className={dashboard.ai?.configured ? 'ai-status live' : 'ai-status'}>
             {dashboard.ai?.configured ? 'Gemini on' : 'Fallback AI'}
           </span>
@@ -533,13 +635,14 @@ function App() {
               tasks={liveTasks}
               friends={dashboard.friends}
               brief={brief}
+              readBriefAloud={readBriefAloud}
               createTask={createTask}
               updateTask={updateTask}
               completeTask={completeTask}
               aiAction={aiAction}
               sendFlare={sendFlare}
               parseVoice={parseVoice}
-              startActionLock={setActionTask}
+              startActionLock={openActionLock}
             />
           )}
           {tab === 'planner' && (
@@ -639,7 +742,12 @@ function Tutorial({ onDone }) {
   );
 }
 
-function LivePage({ tasks, friends, brief, createTask, updateTask, completeTask, aiAction, sendFlare, parseVoice, startActionLock }) {
+function VoiceStatus({ enabled }) {
+  if (!canSpeak()) return <span className="voice-status unavailable">⚠️ Voice unavailable</span>;
+  return enabled ? <span className="voice-status on">🔊 Voice on</span> : <span className="voice-status off">🔇 Voice off</span>;
+}
+
+function LivePage({ tasks, friends, brief, readBriefAloud, createTask, updateTask, completeTask, aiAction, sendFlare, parseVoice, startActionLock }) {
   return (
     <div className="stack">
       <section className="card signal">
@@ -647,6 +755,7 @@ function LivePage({ tasks, friends, brief, createTask, updateTask, completeTask,
           <p className="eyebrow">Daily Signal</p>
           <h2>{brief?.headline || 'Click Daily Signal for a simple plan.'}</h2>
           {brief?.firstMove && <p>{brief.firstMove}</p>}
+          {brief && <button className="read-aloud" onClick={readBriefAloud}>🔊 Read aloud</button>}
         </div>
       </section>
       <TaskForm createTask={createTask} parseVoice={parseVoice} />
@@ -767,21 +876,36 @@ function TaskCard({ task, friends, updateTask, completeTask, aiAction, sendFlare
   const [kind, setKind] = useState('Focus sprint');
   const [message, setMessage] = useState('');
   const [escalationMinutes, setEscalationMinutes] = useState(kind === 'Reminder check-in' ? 30 : 0);
+  const [countdownSeconds, setCountdownSeconds] = useState(() =>
+    Math.max(0, Math.floor((new Date(task.deadline).getTime() - Date.now()) / 1000))
+  );
 
   useEffect(() => {
     if (kind === 'Reminder check-in' && !escalationMinutes) setEscalationMinutes(30);
     if (kind !== 'Reminder check-in' && escalationMinutes) setEscalationMinutes(0);
   }, [kind]);
 
+  useEffect(() => {
+    if (task.heat.label !== 'Last Light') return undefined;
+    const timer = setInterval(() => {
+      setCountdownSeconds(Math.max(0, Math.floor((new Date(task.deadline).getTime() - Date.now()) / 1000)));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [task.deadline, task.heat.label]);
+
+  const countdownMinutes = Math.floor(countdownSeconds / 60);
+  const countdownRemainder = String(countdownSeconds % 60).padStart(2, '0');
+  const timeDisplay = task.heat.label === 'Last Light' ? `${countdownMinutes}:${countdownRemainder}` : timeLeft(task.heat.minutesLeft);
+
   return (
     <article className={`card task ${task.heat.className}`}>
       <div className="task-head">
         <div>
-          <span className="heat">{task.heat.label}</span>
+          <span className={`heat ${task.heat.className}`}>{task.heat.label}</span>
           {task.role === 'helper' && <span className="shared-pill">Shared by @{task.owner_username}</span>}
           <h3>{task.title}</h3>
           <p>
-            {task.category} · {timeLeft(task.heat.minutesLeft)} · {task.effortMinutes} min
+            {task.category} · <span className={task.heat.label === 'Last Light' && countdownSeconds < 30 * 60 ? 'countdown-danger' : ''}>{timeDisplay}</span> · {task.effortMinutes} min
             {task.support_kind ? ` · ${task.support_kind}` : ''}
           </p>
         </div>
@@ -856,10 +980,11 @@ function ActionLock({ task, friends, voiceEnabled, aiAction, updateTask, complet
   const [running, setRunning] = useState(false);
   const [friendId, setFriendId] = useState(friends[0]?.id || '');
   const [blocker, setBlocker] = useState('');
+  const spokenMilestonesRef = useRef(new Set());
   const nextProgress = Math.min(100, Number(task.progress || 0) + 20);
 
   useEffect(() => {
-    speak(`Action lock started for ${task.title}. Your only job is the next twelve minutes.`, voiceEnabled);
+    speak(`Action lock for ${task.title}. Stay focused for ${Math.min(task.effortMinutes || 30, 25)} minutes. Close all distractions.`, voiceEnabled);
   }, []);
 
   useEffect(() => {
@@ -870,9 +995,21 @@ function ActionLock({ task, friends, voiceEnabled, aiAction, updateTask, complet
 
   useEffect(() => {
     if (secondsLeft === 0) {
-      speak(`Action lock finished. Update progress for ${task.title}.`, voiceEnabled);
+      speak(`Time's up. How much progress did you make on ${task.title}? Update it now.`, voiceEnabled);
     }
   }, [secondsLeft]);
+
+  useEffect(() => {
+    if (!voiceEnabled) return;
+    if (secondsLeft <= 300 && secondsLeft > 240 && !spokenMilestonesRef.current.has('5m')) {
+      spokenMilestonesRef.current.add('5m');
+      speak(`5 minutes left in your action lock for ${task.title}. Keep going.`, true);
+    }
+    if (secondsLeft <= 60 && secondsLeft > 0 && !spokenMilestonesRef.current.has('1m')) {
+      spokenMilestonesRef.current.add('1m');
+      speak('1 minute left. Wrap up and note where you stopped.', true);
+    }
+  }, [secondsLeft, voiceEnabled, task.title]);
 
   const minutes = Math.floor(secondsLeft / 60);
   const seconds = String(secondsLeft % 60).padStart(2, '0');

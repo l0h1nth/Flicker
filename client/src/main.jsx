@@ -1753,6 +1753,7 @@ function GuideModal({ onClose }) {
           <p><strong>Last Light</strong><span>Emergency mode when time is tight.</span></p>
           <p><strong>Planner</strong><span>Ranks tasks and builds calendar-ready focus blocks.</span></p>
           <p><strong>Habits</strong><span>Tracks repeatable actions like study or applications.</span></p>
+          <p><strong>Rescue / Chaos points</strong><span>Earn +30 for normal completion, +40 under 6 hours, +50 under 2 hours, +10 if late, and +25 for accepting a Flare. Fun Mode renames the same score Chaos points.</span></p>
           <p><strong>Voice reminders</strong><span>When enabled, Flicker speaks urgent reminders out loud.</span></p>
           <p><strong>Notifications</strong><span>Alerts for urgent tasks and reminder check-ins while Flicker is open.</span></p>
           <p><strong>Send a Flare</strong><span>Ask a friend to volunteer for focus, review, reminders, or an allowed shared subtask.</span></p>

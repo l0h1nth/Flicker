@@ -297,6 +297,12 @@ label {
   color: var(--ink);
 }
 
+.demo-button {
+  border-color: #bfdbfe !important;
+  background: var(--blue-soft) !important;
+  color: var(--blue) !important;
+}
+
 .mode-toggle.active,
 .human-voice-toggle.active {
   border-color: #c7d2fe;

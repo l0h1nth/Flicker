@@ -1,53 +1,100 @@
-# Flicker: AI Deadline Rescue Companion
+# Flicker
 
-Flicker is a hackathon MVP for **The Last-Minute Life Saver** problem statement.
+Flicker is an AI-powered deadline rescue companion built for the **Last-Minute Life Saver** hackathon problem statement.
 
-It turns passive reminders into action nudges, detects deadline heat, and lets users send a **Flare** to friends when a task becomes risky. Gemini powers the daily brief, smart reminders, emergency Last Light mode, and task breakdowns.
+Most reminder apps only say, "You have something due." Flicker focuses on what happens next: deciding what matters, starting the smallest useful action, asking for help when needed, and moving finished work out of the way.
 
-## Features
+## Problem Statement
 
-- AI daily brief for the user's current task board
-- AI Priority Planner for ranking what to do first
-- AI schedule blocks based on available time
-- Action Lock focus mode with timer, blocker help, snooze consequence, and friend escalation
-- Browser notifications for urgent tasks and reminder check-ins while Flicker is open
-- Optional voice reminders using browser speech synthesis
-- Calendar export through `.ics` files
-- Voice task capture using the browser Speech API
-- Goal and habit tracking
-- Username/password login
-- SQLite database for users, tasks, friendships, help requests, and activity
-- Deadline Heat: Calm, Warming, Hot, Critical, Last Light
-- Smart Nudges instead of passive reminders
-- Last Light emergency mode for deadlines under 2 hours
-- Break It Down for overwhelming tasks
-- Friends by username
-- Friend request accept/reject flow
-- Send a Flare for focus sprint, review, reminder support, or allowed subtask takeover
-- Friend volunteer/reject flow for task help requests
-- Accepted Flares become shared Live tasks for the friend
-- Friend progress and completion update both users through auto-refresh
-- Live page for current work and Finished page for completed work
-- First-login tutorial
-- Rescue points and crew activity feed
-- Privacy toggles for missed-task sharing
+Students, professionals, and entrepreneurs often miss assignments, meetings, bill payments, interviews, and commitments because reminders are passive and easy to ignore.
+
+Flicker solves this by combining AI planning, deadline triage, voice assistance, calendar-ready schedules, focused action sessions, habits, and lightweight friend support.
+
+## Key Features
+
+- **Daily Signal:** Gemini creates a short plan for the current task board.
+- **Deadline Heat:** tasks are automatically labeled Calm, Warming, Hot, Critical, Last Light, or Missed.
+- **Last Light Mode:** emergency triage for tasks close to deadline.
+- **Smart Nudge:** one practical next step instead of a passive reminder.
+- **Break Down:** splits overwhelming tasks into smaller steps.
+- **Action Lock:** a focused timer screen with blocker help, progress updates, snooze consequence, and friend escalation.
+- **Planner:** ranks live tasks and explains what to do first, delay, or ask help for.
+- **Schedule Builder:** creates short focus blocks and exports them as `.ics` calendar files.
+- **Voice Task Capture:** lets users speak a task and convert it into a task draft.
+- **Voice Reminders:** speaks urgent reminders when enabled.
+- **Human Voice Mode:** optional Gemini TTS audio for more natural spoken reminders, with browser voice fallback.
+- **Friends and Flares:** add friends by username and request focus, review, reminder check-ins, or allowed subtask support.
+- **Shared Live Tasks:** accepted Flares appear on a friend's Live board, and progress/completion updates both users.
+- **Goal and Habit Tracking:** tracks repeatable actions that reduce future deadline panic.
+- **Rescue Points:** rewards completed work and shows visible progress.
+- **Demo Mode:** loads sample tasks and a habit so judges can test the full workflow instantly.
+- **Night Mode:** persistent light/dark UI toggle.
+
+## Why Flicker Goes Beyond Reminders
+
+Flicker does not only notify the user. It helps the user take action.
+
+When a task becomes risky, Flicker can:
+
+- decide what should be done first
+- turn the task into smaller steps
+- start a focused Action Lock session
+- suggest whether a safe snooze is possible
+- ask a friend to check in
+- build calendar-ready focus blocks
+- speak the reminder out loud
+- move completed work to Finished so the Live board stays clean
+
+## Demo Flow
+
+Use **Load demo** after logging in to create a realistic sample board.
+
+Suggested judge demo:
+
+1. Click **Load demo**.
+2. Click **Daily Signal** to show Gemini's daily plan.
+3. Open the urgent bill task and show **Last Light**.
+4. Open the assignment task and show **Break Down**.
+5. Start **Action Lock** and show blocker help.
+6. Turn on **Human voice** and click **Test voice**.
+7. Go to **Planner** and build a schedule.
+8. Download the schedule as a calendar file.
+9. Add a friend from **Crew** and send a Flare.
+10. Accept the Flare from a second account to show shared task updates.
+
+## Google Technologies Used
+
+- **Google Gemini API** through `@google/genai`
+- **Gemini text generation** for Daily Signal, Smart Nudge, Break Down, Last Light, planning, scheduling, and voice task parsing
+- **Gemini TTS** for optional human-style voice reminders
+- **Google AI Studio deployment path** for the public hackathon application
 
 ## Tech Stack
 
 - React + Vite frontend
 - Express backend
+- Node built-in SQLite through `node:sqlite`
 - Gemini API through `@google/genai`
-- Built-in Node SQLite database through `node:sqlite`
-- Deployable through Google AI Studio / Cloud Run style Node hosting
+- Browser Notifications API
+- Browser Speech Recognition API
+- Browser Speech Synthesis API fallback
+- `.ics` calendar export
 
-## Setup
+## Local Setup
+
+Install dependencies:
 
 ```bash
 npm install
+```
+
+Create `.env`:
+
+```bash
 cp .env.example .env
 ```
 
-Add your Gemini key:
+Add a Gemini API key:
 
 ```bash
 GEMINI_API_KEY=your_key_here
@@ -59,66 +106,55 @@ Run locally:
 npm run dev
 ```
 
-Frontend: `http://localhost:5173`  
+Frontend: `http://localhost:5173`
+
 Backend: `http://localhost:8080`
 
-## Manual Two-User Test
-
-1. Open the app in one browser and create account `alice`.
-2. Open the app in another browser or incognito window and create account `bob`.
-3. As `alice`, go to Crew and send a friend request to `bob`.
-4. As `bob`, accept the friend request.
-5. As `alice`, add a live task and send a Flare to `bob`.
-6. As `bob`, go to Requests and choose Volunteer or Reject.
-7. If Bob volunteers, the shared task appears on Bob's Live page.
-8. As `bob`, update progress or mark it done.
-9. Confirm Alice's dashboard auto-refreshes and the task moves to Finished for both users.
-
-## AI Notes
-
-Flicker uses Gemini when `GEMINI_API_KEY` is available in `.env`. The UI shows `Gemini on` when the key is configured. If the key is missing or Gemini fails, Flicker falls back to local task-aware responses so the app still works during demos.
-
-The main AI actions are:
-
-- **Daily Signal:** a simple plan for the current board.
-- **Action Lock:** focused rescue mode that turns a task into one timed action.
-- **Plan My Day:** ranks live tasks and explains what to do first, delay, or ask help for.
-- **Build Schedule:** creates short focus blocks from available time.
-- **Smart Nudge:** one next action for a task.
-- **Break Down:** small steps for an overwhelming task.
-- **Last Light:** emergency steps when time is tight.
-- **Friend Check-In Escalation:** asks a friend to check in if progress stalls.
-- **Voice Task Parsing:** turns spoken task text into a task draft.
-
-Build and serve production:
+Build production:
 
 ```bash
 npm run build
+```
+
+Serve production:
+
+```bash
 npm start
 ```
 
-Production app: `http://localhost:8080`
+## Manual Two-User Test
 
-## Demo Highlights
+1. Open the app and create account `alice`.
+2. Open another browser window or incognito window and create account `bob`.
+3. As `alice`, go to **Crew** and send a friend request to `bob`.
+4. As `bob`, accept the friend request.
+5. As `alice`, add a task and send a Flare to `bob`.
+6. As `bob`, accept the Flare from **Requests**.
+7. Confirm the shared task appears on Bob's **Live** page.
+8. As `bob`, update progress or mark it done.
+9. Confirm Alice's dashboard updates automatically and the task moves to **Finished**.
 
-- Add a task with a deadline and effort estimate.
-- Use Daily Signal to get an AI-generated plan for the day.
-- Use Planner to rank tasks and export schedule blocks to a calendar file.
-- Use Smart Nudge, Break Down, and Last Light to turn reminders into action.
-- Add a habit such as daily study or job applications.
-- Use Speak Task to add a task by voice.
-- Enable notifications and send a Reminder Check-in Flare.
-- Start Action Lock and show the blocker / friend escalation flow.
-- Toggle Voice Reminders to hear urgent task reminders out loud.
-- Add a friend by username and send a Flare.
-- Accept the Flare from a second account and complete the shared task.
-- Show the task moving from Live to Finished for both users.
+## AI Fallback Behavior
 
-## Google AI Studio Submission Notes
+If `GEMINI_API_KEY` is missing or Gemini is temporarily unavailable, Flicker keeps working with local fallback responses for planning and task help. The UI shows whether Gemini is active or fallback mode is being used.
 
-Use Google AI Studio Build Mode as the core build/deploy tool and deploy the functional solution publicly. Keep the deployed link active through evaluation.
+Human Voice Mode also falls back to browser speech if Gemini TTS is unavailable.
 
-Mandatory submission items:
+## Data Storage
+
+Flicker stores local development data in SQLite:
+
+- users
+- sessions
+- tasks
+- friendships
+- help requests
+- activity
+- habits
+
+The database and environment files are ignored by Git.
+
+## Submission Checklist
 
 - Public deployed application link
 - GitHub repository link
@@ -131,4 +167,4 @@ Mandatory submission items:
 
 ## Project Positioning
 
-Flicker helps users catch deadlines before they collapse. It combines AI planning, smart reminders, deadline triage, and lightweight friend support so users can take meaningful action instead of ignoring passive notifications.
+Flicker is a productivity companion for the moment when ordinary reminders are not enough. It helps users choose, start, escalate, schedule, and finish tasks before deadlines are missed.

@@ -586,6 +586,96 @@ function App() {
     });
   }
 
+  async function loadDemoMode() {
+    await run('Loading demo board', async () => {
+      const hasDemoTasks = dashboard?.liveTasks?.some((task) => String(task.notes || '').includes('Demo Mode sample'));
+      if (hasDemoTasks) {
+        setTab('live');
+        setPanel({
+          title: 'Demo board is ready',
+          body: 'Your sample tasks are already loaded. Try Daily Signal, Planner, Action Lock, Last Light, Human Voice, or Calendar export.'
+        });
+        return;
+      }
+
+      const deadlineIn = (minutes) => new Date(Date.now() + minutes * 60000).toISOString();
+      const demoTasks = [
+        {
+          title: 'Pay electricity bill',
+          deadline: deadlineIn(45),
+          effortMinutes: 8,
+          importance: 5,
+          category: 'Bill',
+          notes: 'Demo Mode sample: last-minute task for Last Light and voice reminder testing.',
+          canAskFriend: true
+        },
+        {
+          title: 'Submit assignment draft',
+          deadline: deadlineIn(190),
+          effortMinutes: 130,
+          importance: 5,
+          category: 'College',
+          notes: 'Demo Mode sample: use Break Down, Smart Nudge, and Action Lock here.',
+          canAskFriend: true,
+          progress: 35
+        },
+        {
+          title: 'Prepare interview answers',
+          deadline: deadlineIn(26 * 60),
+          effortMinutes: 90,
+          importance: 5,
+          category: 'Career',
+          notes: 'Demo Mode sample: good for Planner and calendar schedule blocks.',
+          canAskFriend: true
+        },
+        {
+          title: 'Send project update email',
+          deadline: deadlineIn(7 * 60),
+          effortMinutes: 25,
+          importance: 3,
+          category: 'Work',
+          notes: 'Demo Mode sample: a small task that should not be ignored.',
+          canAskFriend: false
+        }
+      ];
+
+      let data = dashboard;
+      for (const task of demoTasks) {
+        data = await api('/api/tasks', { method: 'POST', body: task });
+        if (task.progress) {
+          const createdTask = data.liveTasks.find((item) => item.title === task.title && String(item.notes || '').includes('Demo Mode sample'));
+          if (createdTask) {
+            data = await api(`/api/tasks/${createdTask.id}`, { method: 'PATCH', body: { progress: task.progress } });
+          }
+        }
+      }
+
+      const hasDemoHabit = data.habits?.some((habit) => habit.title === 'Daily 25-minute focus block');
+      if (!hasDemoHabit) {
+        data = await api('/api/habits', {
+          method: 'POST',
+          body: {
+            title: 'Daily 25-minute focus block',
+            targetCount: 1,
+            period: 'daily'
+          }
+        });
+      }
+
+      setDashboard(data);
+      setTab('live');
+      setPanel({
+        title: 'Demo board loaded',
+        body: 'Sample deadlines, one habit, and a partially completed task are ready. Start with Daily Signal, then show Last Light, Action Lock, Planner, and Human Voice.',
+        lines: [
+          'Pay electricity bill demonstrates urgent Last Light behavior.',
+          'Submit assignment draft demonstrates Break Down and Action Lock.',
+          'Prepare interview answers demonstrates planning and calendar export.'
+        ]
+      });
+    });
+  }
+
   async function updateTask(taskId, body) {
     await run('Updating task', async () => {
       const data = await api(`/api/tasks/${taskId}`, { method: 'PATCH', body });
@@ -812,6 +902,7 @@ function App() {
             </div>
             <div className="quick-actions">
               <button onClick={aiBrief}>Daily Signal</button>
+              <button className="secondary demo-button" onClick={loadDemoMode}>Load demo</button>
               <button className="secondary" onClick={() => setGuideOpen(true)}>Guide</button>
               <button className="secondary" onClick={() => speak(funMode ? "I'm watching you. The deadlines are watching you. We're all watching." : 'Flicker voice is active. Deadline rescue standing by.', true)}>
                 Test voice

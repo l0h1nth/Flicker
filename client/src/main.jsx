@@ -645,7 +645,7 @@ function App() {
       )}
 
       <header className="topbar">
-        <div>
+        <div className="brand-block">
           <p className="eyebrow">Deadline companion</p>
           <h1>Flicker</h1>
           <p>
@@ -654,38 +654,44 @@ function App() {
           </p>
         </div>
         <div className="top-actions">
-          <button className="help-chip" onClick={() => setGuideOpen(true)} title="Open guide">Guide</button>
-          <label>
-            Energy
-            <select value={dashboard.user.energy} onChange={(event) => patchProfile({ energy: event.target.value })}>
-              <option value="low">Low</option>
-              <option value="okay">Okay</option>
-              <option value="high">High</option>
-            </select>
-          </label>
-          <button onClick={aiBrief}>Daily Signal</button>
-          <button className="secondary" onClick={enableNotifications}>
-            {notificationsEnabled ? 'Notifications on' : 'Enable notifications'}
-          </button>
-          <label className="voice-toggle">
-            <input
-              type="checkbox"
-              checked={dashboard.user.voiceReminders}
-              onChange={(event) => patchProfile({ voiceReminders: event.target.checked })}
-            />
-            Voice reminders
-          </label>
-          <button className="secondary" onClick={() => speak(funMode ? "I'm watching you. The deadlines are watching you. We're all watching." : 'Flicker voice is active. Deadline rescue standing by.', true)}>
-            Test voice
-          </button>
-          <VoiceStatus enabled={dashboard.user.voiceReminders} funMode={funMode} />
-          <button className={funMode ? 'fun-toggle active' : 'fun-toggle'} onClick={() => setFunMode(!funMode)}>
-            {funMode ? 'Fun mode on' : 'Fun mode'}
-          </button>
-          <span className={dashboard.ai?.configured ? 'ai-status live' : 'ai-status'}>
-            {dashboard.ai?.configured ? 'Gemini on' : 'Fallback mode'}
-          </span>
-          <button className="secondary" onClick={logout}>Logout</button>
+          <div className="toolbar-row toolbar-primary">
+            <button className="help-chip" onClick={() => setGuideOpen(true)} title="Open guide">Guide</button>
+            <button onClick={aiBrief}>Daily Signal</button>
+            <button className="secondary" onClick={() => speak(funMode ? "I'm watching you. The deadlines are watching you. We're all watching." : 'Flicker voice is active. Deadline rescue standing by.', true)}>
+              Test voice
+            </button>
+          </div>
+          <div className="toolbar-row toolbar-settings">
+            <label className="energy-control">
+              <span>Energy</span>
+              <select value={dashboard.user.energy} onChange={(event) => patchProfile({ energy: event.target.value })}>
+                <option value="low">Low</option>
+                <option value="okay">Okay</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+            <button className="secondary" onClick={enableNotifications}>
+              {notificationsEnabled ? 'Notifications on' : 'Enable notifications'}
+            </button>
+            <label className="voice-toggle">
+              <input
+                type="checkbox"
+                checked={dashboard.user.voiceReminders}
+                onChange={(event) => patchProfile({ voiceReminders: event.target.checked })}
+              />
+              Voice reminders
+            </label>
+            <button className={funMode ? 'fun-toggle active' : 'fun-toggle'} onClick={() => setFunMode(!funMode)}>
+              {funMode ? 'Fun mode on' : 'Fun mode'}
+            </button>
+          </div>
+          <div className="toolbar-row toolbar-status">
+            <VoiceStatus enabled={dashboard.user.voiceReminders} funMode={funMode} />
+            <span className={dashboard.ai?.configured ? 'ai-status live' : 'ai-status'}>
+              {dashboard.ai?.configured ? 'Gemini on' : 'Fallback mode'}
+            </span>
+            <button className="secondary logout-button" onClick={logout}>Logout</button>
+          </div>
         </div>
       </header>
 

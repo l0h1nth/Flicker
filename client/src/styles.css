@@ -133,22 +133,27 @@ label {
 .banner,
 .error,
 .loading {
-  max-width: 1320px;
+  max-width: 1500px;
   margin-left: auto;
   margin-right: auto;
 }
 
 .topbar {
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) auto;
-  gap: 1rem;
-  align-items: center;
+  grid-template-columns: minmax(240px, 330px) minmax(0, 1fr);
+  gap: 1.25rem;
+  align-items: stretch;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: #ffffff;
   box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
   margin-bottom: 0.85rem;
   padding: 1rem;
+}
+
+.brand-block {
+  display: grid;
+  align-content: center;
 }
 
 .topbar h1 {
@@ -164,15 +169,72 @@ label {
 }
 
 .top-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: end;
-  justify-content: flex-end;
-  gap: 0.5rem;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.55rem;
+  align-content: center;
 }
 
-.top-actions label {
-  min-width: 124px;
+.toolbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card-soft);
+  padding: 0.55rem;
+}
+
+.toolbar-primary {
+  justify-content: flex-end;
+}
+
+.toolbar-settings {
+  justify-content: flex-end;
+}
+
+.toolbar-status {
+  justify-content: flex-end;
+  min-width: 265px;
+}
+
+.toolbar-row > button,
+.toolbar-row > .ai-status,
+.toolbar-row > .voice-status,
+.toolbar-row > .voice-toggle,
+.toolbar-row > .fun-toggle,
+.toolbar-row > .energy-control {
+  min-height: 44px;
+}
+
+.toolbar-primary > button {
+  min-width: 112px;
+}
+
+.toolbar-settings > button,
+.toolbar-settings > .voice-toggle,
+.toolbar-settings > .fun-toggle {
+  min-width: 148px;
+}
+
+.energy-control {
+  display: grid;
+  grid-template-columns: auto 112px;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 184px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--muted);
+  padding: 0.35rem 0.42rem 0.35rem 0.65rem;
+}
+
+.energy-control select {
+  height: 34px;
+  padding: 0.35rem 0.55rem;
+  border-radius: 6px;
 }
 
 .eyebrow {
@@ -201,6 +263,7 @@ label {
   padding: 0.5rem 0.72rem;
   font-size: 0.84rem;
   font-weight: 750;
+  white-space: nowrap;
 }
 
 .score-chip {
@@ -236,6 +299,18 @@ label {
 
 .voice-toggle {
   cursor: pointer;
+}
+
+.logout-button {
+  min-width: 88px;
+  color: var(--red) !important;
+  border-color: #fecdd3 !important;
+  background: #ffffff !important;
+}
+
+.logout-button:hover {
+  background: var(--red-soft) !important;
+  border-color: #fda4af !important;
 }
 
 .voice-toggle input,

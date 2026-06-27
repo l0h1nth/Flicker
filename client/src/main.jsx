@@ -14,6 +14,8 @@ const tokenKey = 'flicker-token-v2';
 const funModeKey = 'flicker-fun-mode-v1';
 const darkModeKey = 'flicker-night-mode-v1';
 const voiceKey = 'flicker-voice-name-v1';
+const humanVoiceKey = 'flicker-human-voice-v1';
+let activeHumanAudio = null;
 const flareHelp = {
   'Focus sprint': 'Your friend agrees to work alongside you for a short focused session.',
   'Review / unblock': 'Your friend helps check, explain, or unblock the task. They are not doing dishonest work for you.',
@@ -165,7 +167,7 @@ function showBrowserNotification(title, body) {
   });
 }
 
-function speak(text, enabled = true) {
+function browserSpeak(text, enabled = true) {
   if (!enabled || !canSpeak()) return;
   window.speechSynthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(text);
@@ -176,6 +178,40 @@ function speak(text, enabled = true) {
   utterance.pitch = 1.02;
   utterance.volume = 0.92;
   window.speechSynthesis.speak(utterance);
+}
+
+async function playHumanVoice(text) {
+  const token = localStorage.getItem(tokenKey);
+  if (!token) throw new Error('Missing token for human voice.');
+
+  const response = await fetch(`${apiBase}/api/ai/tts`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify({ text, voiceName: 'Kore' })
+  });
+  if (!response.ok) throw new Error('Human voice unavailable.');
+
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  if (activeHumanAudio) {
+    activeHumanAudio.pause();
+    URL.revokeObjectURL(activeHumanAudio.src);
+  }
+  activeHumanAudio = new Audio(url);
+  activeHumanAudio.onended = () => URL.revokeObjectURL(url);
+  await activeHumanAudio.play();
+}
+
+function speak(text, enabled = true) {
+  if (!enabled) return;
+  if (localStorage.getItem(humanVoiceKey) === 'true') {
+    playHumanVoice(text).catch(() => browserSpeak(text, true));
+    return;
+  }
+  browserSpeak(text, true);
 }
 
 function roast(category, enabled) {
@@ -303,6 +339,7 @@ function App() {
   const [actionTask, setActionTask] = useState(null);
   const [funMode, setFunModeState] = useState(() => localStorage.getItem(funModeKey) === 'true');
   const [darkMode, setDarkModeState] = useState(() => localStorage.getItem(darkModeKey) === 'true');
+  const [humanVoice, setHumanVoiceState] = useState(() => localStorage.getItem(humanVoiceKey) === 'true');
   const [voices, setVoices] = useState([]);
   const [selectedVoice, setSelectedVoice] = useState(() => localStorage.getItem(voiceKey) || '');
   const [notificationsEnabled, setNotificationsEnabled] = useState(canNotify() && Notification.permission === 'granted');
@@ -329,6 +366,11 @@ function App() {
   function setDarkMode(nextValue) {
     setDarkModeState(nextValue);
     localStorage.setItem(darkModeKey, String(nextValue));
+  }
+
+  function setHumanVoice(nextValue) {
+    setHumanVoiceState(nextValue);
+    localStorage.setItem(humanVoiceKey, String(nextValue));
   }
 
   function setVoice(nextValue) {
@@ -800,6 +842,9 @@ function App() {
               />
               Voice reminders
             </label>
+            <button className={humanVoice ? 'human-voice-toggle active' : 'human-voice-toggle'} onClick={() => setHumanVoice(!humanVoice)}>
+              {humanVoice ? 'Human voice on' : 'Human voice'}
+            </button>
             {voices.length > 0 && (
               <label className="voice-select">
                 <span>Voice</span>

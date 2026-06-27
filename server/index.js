@@ -13,6 +13,7 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const port = process.env.PORT || 8080;
 const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const ttsModel = process.env.GEMINI_TTS_MODEL || 'gemini-2.5-flash-preview-tts';
 const fallbackModels = (process.env.GEMINI_FALLBACK_MODELS || 'gemini-2.0-flash')
   .split(',')
   .map((item) => item.trim())
@@ -254,6 +255,28 @@ function safeParseJson(text, fallback) {
   } catch {
     return fallback;
   }
+}
+
+function wavFromPcm(pcmBuffer, sampleRate = 24000, channels = 1, bitsPerSample = 16) {
+  const header = Buffer.alloc(44);
+  const byteRate = sampleRate * channels * bitsPerSample / 8;
+  const blockAlign = channels * bitsPerSample / 8;
+
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + pcmBuffer.length, 4);
+  header.write('WAVE', 8);
+  header.write('fmt ', 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(channels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(byteRate, 28);
+  header.writeUInt16LE(blockAlign, 32);
+  header.writeUInt16LE(bitsPerSample, 34);
+  header.write('data', 36);
+  header.writeUInt32LE(pcmBuffer.length, 40);
+
+  return Buffer.concat([header, pcmBuffer]);
 }
 
 async function generateJson(prompt, fallback) {
@@ -1059,6 +1082,50 @@ Schema:
   );
 
   res.json(result);
+});
+
+app.post('/api/ai/tts', auth, async (req, res) => {
+  if (!ai) return res.status(503).json({ error: 'Gemini API key is not configured.' });
+
+  const text = String(req.body.text || '').replace(/\s+/g, ' ').trim().slice(0, 420);
+  if (!text) return res.status(400).json({ error: 'Text is required.' });
+
+  try {
+    const response = await ai.models.generateContent({
+      model: ttsModel,
+      contents: [{
+        parts: [{
+          text: `Say in a warm, natural, calm human voice. Keep it conversational and clear, like a helpful friend beside the user. Text: ${text}`
+        }]
+      }],
+      config: {
+        responseModalities: ['AUDIO'],
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: {
+              voiceName: String(req.body.voiceName || 'Kore')
+            }
+          }
+        }
+      }
+    });
+
+    const inlineData = response.candidates?.[0]?.content?.parts?.find((part) => part.inlineData)?.inlineData;
+    if (!inlineData?.data) throw new Error('No audio returned from Gemini TTS.');
+
+    const audioBuffer = Buffer.from(inlineData.data, 'base64');
+    const mimeType = inlineData.mimeType || 'audio/L16;codec=pcm;rate=24000';
+    const rateMatch = mimeType.match(/rate=(\d+)/i);
+    const sampleRate = rateMatch ? Number(rateMatch[1]) : 24000;
+    const body = mimeType.includes('wav') ? audioBuffer : wavFromPcm(audioBuffer, sampleRate);
+
+    res.setHeader('Content-Type', 'audio/wav');
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(body);
+  } catch (error) {
+    console.error('Gemini TTS failed:', error.message || error);
+    res.status(503).json({ error: 'Human voice is unavailable right now.' });
+  }
 });
 
 const distPath = path.join(__dirname, '..', 'dist');

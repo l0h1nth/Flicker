@@ -297,7 +297,8 @@ label {
   color: var(--ink);
 }
 
-.mode-toggle.active {
+.mode-toggle.active,
+.human-voice-toggle.active {
   border-color: #c7d2fe;
   background: var(--accent-soft);
   color: var(--accent);
@@ -447,6 +448,7 @@ label {
 .ai-status,
 .voice-status,
 .voice-toggle,
+.human-voice-toggle,
 .fun-toggle,
 .help-chip {
   display: inline-flex;

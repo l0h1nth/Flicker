@@ -168,13 +168,16 @@ function showBrowserNotification(title, body) {
   });
 }
 
+function stopActiveHumanAudio() {
+  if (!activeHumanAudio) return;
+  activeHumanAudio.pause();
+  URL.revokeObjectURL(activeHumanAudio.src);
+  activeHumanAudio = null;
+}
+
 function browserSpeak(text, enabled = true) {
   if (!enabled || !canSpeak()) return;
-  if (activeHumanAudio) {
-    activeHumanAudio.pause();
-    URL.revokeObjectURL(activeHumanAudio.src);
-    activeHumanAudio = null;
-  }
+  stopActiveHumanAudio();
   window.speechSynthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(text);
   const preferredVoice = getPreferredVoice();
@@ -190,11 +193,7 @@ async function playHumanVoice(text, sequence) {
   const token = localStorage.getItem(tokenKey);
   if (!token) throw new Error('Missing token for human voice.');
   if (canSpeak()) window.speechSynthesis.cancel();
-  if (activeHumanAudio) {
-    activeHumanAudio.pause();
-    URL.revokeObjectURL(activeHumanAudio.src);
-    activeHumanAudio = null;
-  }
+  stopActiveHumanAudio();
 
   const response = await fetch(`${apiBase}/api/ai/tts`, {
     method: 'POST',
@@ -209,12 +208,13 @@ async function playHumanVoice(text, sequence) {
   const blob = await response.blob();
   if (sequence !== speechSequence) return;
   const url = URL.createObjectURL(blob);
-  if (activeHumanAudio) {
-    activeHumanAudio.pause();
-    URL.revokeObjectURL(activeHumanAudio.src);
-  }
+  stopActiveHumanAudio();
   activeHumanAudio = new Audio(url);
-  activeHumanAudio.onended = () => URL.revokeObjectURL(url);
+  activeHumanAudio.onended = () => {
+    URL.revokeObjectURL(url);
+    if (activeHumanAudio?.src === url) activeHumanAudio = null;
+  };
+  activeHumanAudio.onerror = activeHumanAudio.onended;
   await activeHumanAudio.play();
 }
 
@@ -483,19 +483,25 @@ function App() {
       return;
     }
 
-    if (canNotify() && Notification.permission === 'granted') {
-      for (const request of data.incomingHelpRequests || []) {
-        const key = `flare-${request.id}-${request.status}`;
-        if (request.status === 'pending' && !notifiedRef.current.has(key)) {
+    for (const request of data.incomingHelpRequests || []) {
+      const key = `flare-${request.id}-${request.status}`;
+      if (request.status === 'pending') {
+        if (canNotify() && Notification.permission === 'granted' && !notifiedRef.current.has(key)) {
           notifiedRef.current.add(key);
           showBrowserNotification(
             request.kind === 'Reminder check-in' ? 'Reminder check-in request' : 'New Flare request',
             `@${request.ownerUsername} needs ${request.kind} for "${request.taskTitle}".`
           );
+        }
+        const voiceKey = `speak-${key}`;
+        if (voiceEnabled && !spokenStageRef.current.has(voiceKey)) {
+          spokenStageRef.current.add(voiceKey);
           speak(`Flicker check-in. ${request.ownerUsername} needs ${request.kind} for ${request.taskTitle}.`, voiceEnabled);
         }
       }
+    }
 
+    if (canNotify() && Notification.permission === 'granted') {
       for (const task of (data.liveTasks || []).map(normalizeTask)) {
         const key = `notif-${task.id}-${task.heat.label}`;
         if (task.heat.minutesLeft >= 0 && task.heat.level >= 4 && !notifiedRef.current.has(key)) {
@@ -509,7 +515,7 @@ function App() {
   }
 
   function maybeSpeak(data, voiceEnabled = false, roastEnabled = false, allowRepeats = false) {
-    if (!voiceEnabled || !canSpeak()) return;
+    if (!voiceEnabled) return;
     const nowMs = Date.now();
 
     for (const task of (data.liveTasks || []).map(normalizeTask)) {

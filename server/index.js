@@ -280,7 +280,13 @@ function wavFromPcm(pcmBuffer, sampleRate = 24000, channels = 1, bitsPerSample =
 }
 
 async function generateJson(prompt, fallback) {
-  if (!ai) return fallback;
+  if (!ai) {
+    return {
+      ...fallback,
+      offline: true,
+      note: 'Gemini API key is not configured, so Flicker used a local fallback.'
+    };
+  }
 
   const modelsToTry = [...new Set([model, ...fallbackModels])];
   let lastError = null;

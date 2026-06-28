@@ -3,11 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22.5.0"
+  },
   "scripts": {
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "dev:server": "node --watch server/index.js",
     "dev:client": "vite client --host 0.0.0.0",
     "build": "vite build client --outDir ../dist --emptyOutDir",
+    "gcp-build": "npm run build",
     "start": "node server/index.js"
   },
   "dependencies": {

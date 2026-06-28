@@ -1,84 +1,141 @@
 # Flicker
 
-Flicker is an AI-powered deadline rescue companion built for the **Last-Minute Life Saver** hackathon problem statement.
+**Flicker** is an AI-powered productivity companion for the **Last-Minute Life Saver** hackathon problem statement.
 
-Most reminder apps only say, "You have something due." Flicker focuses on what happens next: deciding what matters, starting the smallest useful action, asking for help when needed, and moving finished work out of the way.
+Most productivity apps stop at passive reminders. Flicker helps users decide what to do next, start focused work, ask friends for support, schedule realistic focus blocks, and complete tasks before deadlines are missed.
 
 ## Problem Statement
 
-Students, professionals, and entrepreneurs often miss assignments, meetings, bill payments, interviews, and commitments because reminders are passive and easy to ignore.
+**The Last-Minute Life Saver**
 
-Flicker solves this by combining AI planning, deadline triage, voice assistance, calendar-ready schedules, focused action sessions, habits, and lightweight friend support.
+Students, professionals, and entrepreneurs often miss assignments, meetings, bill payments, interviews, and commitments. Existing tools usually remind users, but they do not help users complete the work.
+
+Flicker turns reminders into action.
+
+## Live Demo And Submission Links
+
+Add these before final submission:
+
+- **Deployed application:** `PASTE_GOOGLE_CLOUD_URL_HERE`
+- **GitHub repository:** `PASTE_GITHUB_REPOSITORY_URL_HERE`
+- **Project description Google Doc:** `PASTE_GOOGLE_DOC_URL_HERE`
+
+## What Flicker Does
+
+Flicker watches a user's task board and helps them move from panic to action:
+
+- It prioritizes tasks using deadline, effort, progress, importance, and user energy.
+- It creates a short AI daily plan called **Daily Signal**.
+- It turns risky tasks into specific next actions through **Smart Nudge**.
+- It splits large tasks through **Break Down**.
+- It opens emergency triage through **Last Light**.
+- It starts focused work through **Action Lock**.
+- It creates calendar-ready schedules.
+- It lets users ask friends for help through **Flares**.
+- It rewards completed action with **Rescue Points**.
+- It supports spoken reminders through browser voice and optional Gemini Human Voice.
 
 ## Key Features
 
-- **Daily Signal:** Gemini creates a short plan for the current task board.
-- **Deadline Heat:** tasks are automatically labeled Calm, Warming, Hot, Critical, Last Light, or Missed.
-- **Last Light Mode:** emergency triage for tasks close to deadline.
-- **Smart Nudge:** one practical next step instead of a passive reminder.
-- **Break Down:** splits overwhelming tasks into smaller steps.
-- **Action Lock:** a focused timer screen with blocker help, progress updates, snooze consequence, and friend escalation.
-- **Planner:** ranks live tasks and explains what to do first, delay, or ask help for.
-- **Schedule Builder:** creates short focus blocks and exports them as `.ics` calendar files.
-- **Voice Task Capture:** lets users speak a task and convert it into a task draft.
-- **Voice Reminders:** speaks urgent reminders when enabled.
-- **Human Voice Mode:** optional Gemini TTS audio for more natural spoken reminders, with browser voice fallback.
-- **Friends and Flares:** add friends by username and request focus, review, reminder check-ins, or allowed subtask support.
-- **Shared Live Tasks:** accepted Flares appear on a friend's Live board, and progress/completion updates both users.
-- **Goal and Habit Tracking:** tracks repeatable actions that reduce future deadline panic.
-- **Rescue Points:** rewards completed work, with bonuses for urgent saves and shared task help.
-- **Demo Mode:** loads sample tasks and a habit so judges can test the full workflow instantly.
-- **Night Mode:** persistent light/dark UI toggle.
+### AI Productivity
 
-## Why Flicker Goes Beyond Reminders
+- **Daily Signal:** Gemini summarizes the current board and suggests the first move.
+- **Smart Nudge:** Gemini gives one practical next action for a task.
+- **Break Down:** Gemini splits an overwhelming task into small steps.
+- **Last Light:** Gemini gives emergency moves when time is nearly gone.
+- **Planner:** Gemini ranks tasks and explains what to do first, delay, or ask help for.
+- **Schedule Builder:** Gemini turns available time into focus blocks.
+- **Voice Task Parsing:** Gemini converts spoken task text into structured task fields.
 
-Flicker does not only notify the user. It helps the user take action.
+### Action And Accountability
 
-When a task becomes risky, Flicker can:
+- **Action Lock:** a focused timer with progress update, blocker help, snooze consequence, and friend escalation.
+- **Deadline Heat:** tasks are labeled Calm, Warming, Hot, Critical, Last Light, Missed, or Done.
+- **Friend Flares:** users can ask friends for focus sprint, review/unblock, reminder check-in, or allowed subtask support.
+- **Shared Live Tasks:** accepted Flares appear on the friend's Live board; progress and completion sync for both users.
+- **Friend Check-In Escalation:** reminder check-ins can escalate if progress stalls.
 
-- decide what should be done first
-- turn the task into smaller steps
-- start a focused Action Lock session
-- suggest whether a safe snooze is possible
-- ask a friend to check in
-- build calendar-ready focus blocks
-- speak the reminder out loud
-- move completed work to Finished so the Live board stays clean
+### Experience
+
+- **Human Voice Mode:** optional Gemini TTS for more natural spoken reminders.
+- **Browser Voice Fallback:** works even if Gemini TTS is unavailable.
+- **Notifications:** browser notifications for urgent tasks and friend requests.
+- **Calendar Export:** tasks and generated schedules export as `.ics` files.
+- **Goal And Habit Tracking:** daily or weekly habits that reduce future deadline panic.
+- **Rescue / Chaos Points:** completion rewards; Fun Mode renames Rescue Points to Chaos Points.
+- **Night Mode:** persistent light/dark UI.
+- **Demo Mode:** loads realistic sample tasks and a habit for fast judging.
+
+## Rescue Points
+
+Flicker rewards completed action:
+
+- Late completion: `+10`
+- Normal completion: `+30`
+- Due within 6 hours: `+40`
+- Due within 2 hours: `+50`
+- Accepting a Flare: `+25`
+- Completing a friend's shared task: completion points plus a helper bonus
+
+When Fun Mode is enabled, the same score is displayed as **Chaos Points**.
 
 ## Demo Flow
 
-Use **Load demo** after logging in to create a realistic sample board.
+Use the **Load demo** button after login.
 
-Suggested judge demo:
+Suggested judge walkthrough:
 
 1. Click **Load demo**.
 2. Click **Daily Signal** to show Gemini's daily plan.
-3. Open the urgent bill task and show **Last Light**.
+3. Open the bill task and show **Last Light**.
 4. Open the assignment task and show **Break Down**.
 5. Start **Action Lock** and show blocker help.
-6. Turn on **Human voice** and click **Test voice**.
+6. Turn on **Human Voice** and click **Test voice**.
 7. Go to **Planner** and build a schedule.
 8. Download the schedule as a calendar file.
-9. Add a friend from **Crew** and send a Flare.
-10. Accept the Flare from a second account to show shared task updates.
-
-## Google Technologies Used
-
-- **Google Gemini API** through `@google/genai`
-- **Gemini text generation** for Daily Signal, Smart Nudge, Break Down, Last Light, planning, scheduling, and voice task parsing
-- **Gemini TTS** for optional human-style voice reminders
-- **Google AI Studio deployment path** for the public hackathon application
+9. Add a second user from **Crew**.
+10. Send a **Flare** and accept it from the second account.
+11. Update or complete the shared task and show both dashboards updating.
 
 ## Tech Stack
 
-- React + Vite frontend
-- Express backend
-- Node built-in SQLite through `node:sqlite`
-- Gemini API through `@google/genai`
+- React
+- Vite
+- Express.js
+- Node.js
+- SQLite through `node:sqlite`
+- `@google/genai`
 - Browser Notifications API
 - Browser Speech Recognition API
-- Browser Speech Synthesis API fallback
-- `.ics` calendar export
+- Browser Speech Synthesis API
+- Google Cloud deployment
+
+## Google Technologies Utilized
+
+- **Gemini API** for planning, nudges, breakdowns, emergency triage, scheduling, and voice task parsing.
+- **Gemini TTS** for optional human-style spoken reminders.
+- **Google AI Studio** as the Gemini build/testing surface and deployment reference.
+- **Google Cloud Run** for the deployed web application.
+
+## Architecture
+
+```text
+React + Vite frontend
+        |
+        | REST API
+        v
+Express server
+        |
+        | SQLite local database
+        v
+Users, sessions, tasks, habits, friends, flares, activity
+        |
+        | Gemini API
+        v
+AI planning, task parsing, schedule generation, TTS
+```
+
+The Express server also serves the production frontend from `dist/`.
 
 ## Local Setup
 
@@ -88,27 +145,28 @@ Install dependencies:
 npm install
 ```
 
-Create `.env`:
+Create environment file:
 
 ```bash
 cp .env.example .env
 ```
 
-Add a Gemini API key:
+Add your Gemini key:
 
 ```bash
 GEMINI_API_KEY=your_key_here
 ```
 
-Run locally:
+Run development mode:
 
 ```bash
 npm run dev
 ```
 
-Frontend: `http://localhost:5173`
+Local URLs:
 
-Backend: `http://localhost:8080`
+- Frontend: `http://localhost:5173`
+- Backend: `http://localhost:8080`
 
 Build production:
 
@@ -122,49 +180,67 @@ Serve production:
 npm start
 ```
 
-## Manual Two-User Test
+Production URL:
 
-1. Open the app and create account `alice`.
-2. Open another browser window or incognito window and create account `bob`.
-3. As `alice`, go to **Crew** and send a friend request to `bob`.
-4. As `bob`, accept the friend request.
-5. As `alice`, add a task and send a Flare to `bob`.
-6. As `bob`, accept the Flare from **Requests**.
-7. Confirm the shared task appears on Bob's **Live** page.
-8. As `bob`, update progress or mark it done.
-9. Confirm Alice's dashboard updates automatically and the task moves to **Finished**.
+```text
+http://localhost:8080
+```
+
+## Environment Variables
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `GEMINI_API_KEY` | Yes for AI | Gemini API key |
+| `GOOGLE_API_KEY` | Optional | Alternative Gemini key name |
+| `GEMINI_MODEL` | Optional | Default text model, currently `gemini-2.5-flash` |
+| `GEMINI_FALLBACK_MODELS` | Optional | Comma-separated fallback text models |
+| `GEMINI_TTS_MODEL` | Optional | TTS model, currently `gemini-2.5-flash-preview-tts` |
+| `PORT` | Cloud Run provides this | Server port |
+| `SQLITE_PATH` | Optional | SQLite database path |
 
 ## AI Fallback Behavior
 
-If `GEMINI_API_KEY` is missing or Gemini is temporarily unavailable, Flicker keeps working with local fallback responses for planning and task help. The UI shows whether Gemini is active or fallback mode is being used.
+If Gemini is unavailable or the key is missing, Flicker still runs with local fallback responses. The UI shows fallback mode so the demo does not break.
 
-Human Voice Mode also falls back to browser speech if Gemini TTS is unavailable.
+Human Voice Mode falls back to browser speech when Gemini TTS is unavailable.
 
-## Data Storage
+## Manual Two-User Test
 
-Flicker stores local development data in SQLite:
+1. Create account `alice`.
+2. Open another browser or incognito window and create account `bob`.
+3. As Alice, go to **Crew** and send a friend request to Bob.
+4. As Bob, accept the request.
+5. As Alice, add a task and send a Flare to Bob.
+6. As Bob, accept the Flare from **Requests**.
+7. Confirm the shared task appears on Bob's **Live** page.
+8. As Bob, update progress or complete the task.
+9. Confirm Alice's dashboard updates and the task moves to **Finished**.
 
-- users
-- sessions
-- tasks
-- friendships
-- help requests
-- activity
-- habits
+## Google Cloud Deployment
 
-The database and environment files are ignored by Git.
+Short Cloud Run path:
 
-## Submission Checklist
+```bash
+gcloud config set project YOUR_PROJECT_ID
+gcloud run deploy flicker \
+  --source . \
+  --region asia-south1 \
+  --allow-unauthenticated \
+  --set-env-vars GEMINI_API_KEY=YOUR_GEMINI_KEY,GEMINI_MODEL=gemini-2.5-flash,GEMINI_FALLBACK_MODELS=gemini-2.0-flash,GEMINI_TTS_MODEL=gemini-2.5-flash-preview-tts
+```
 
-- Public deployed application link
-- GitHub repository link
-- Google Doc project description with:
-  - Problem Statement Selected
-  - Solution Overview
-  - Key Features
-  - Technologies Used
-  - Google Technologies Utilized
+## Submission Documents
 
-## Project Positioning
+Google Doc-ready project description:
 
-Flicker is a productivity companion for the moment when ordinary reminders are not enough. It helps users choose, start, escalate, schedule, and finish tasks before deadlines are missed.
+- [`docs/project-description.md`](docs/project-description.md)
+
+## Important Deployment Note
+
+This MVP uses SQLite for a simple hackathon deployment. On Cloud Run, the container filesystem is ephemeral, so data may reset when a container instance is replaced. For a production version, replace SQLite with Cloud SQL or Firestore.
+
+For hackathon evaluation, Flicker includes **Demo Mode** so judges can quickly create a full sample board even if the runtime starts fresh.
+
+## License
+
+Hackathon MVP. Add a license before public production use.

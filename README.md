@@ -241,6 +241,4 @@ This MVP uses SQLite for a simple hackathon deployment. On Cloud Run, the contai
 
 For hackathon evaluation, Flicker includes **Demo Mode** so judges can quickly create a full sample board even if the runtime starts fresh.
 
-## License
 
-Hackathon MVP. Add a license before public production use.

@@ -1,6 +1,6 @@
 # Flicker
 
-**Flicker** is an AI-powered productivity companion for the **Last-Minute Life Saver** hackathon problem statement.
+**Flicker** is an AI-powered productivity companion for the **Last-Minute Life Saver** .
 
 Most productivity apps stop at passive reminders. Flicker helps users decide what to do next, start focused work, ask friends for support, schedule realistic focus blocks, and complete tasks before deadlines are missed.
 

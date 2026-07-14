@@ -583,8 +583,12 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password })
       }).then(async (res) => {
-        const payload = await res.json();
-        if (!res.ok) throw new Error(payload.error || 'Login failed.');
+        const isJson = res.headers.get('content-type')?.includes('application/json');
+        const payload = isJson ? await res.json().catch(() => ({})) : {};
+        if (!res.ok) {
+          throw new Error(payload.error || 'Flicker server is unavailable. Start the app with npm run dev.');
+        }
+        if (!isJson) throw new Error('Flicker server returned an invalid response.');
         return payload;
       });
       localStorage.setItem(tokenKey, data.token);

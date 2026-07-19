@@ -208,25 +208,6 @@ Human Voice Mode falls back to browser speech when Gemini TTS is unavailable.
 8. As Bob, update progress or complete the task.
 9. Confirm Alice's dashboard updates and the task moves to **Finished**.
 
-## Google Cloud Deployment
-
-Short Cloud Run path:
-
-```bash
-gcloud config set project YOUR_PROJECT_ID
-gcloud run deploy flicker \
-  --source . \
-  --region asia-south1 \
-  --allow-unauthenticated \
-  --set-env-vars GEMINI_API_KEY=YOUR_GEMINI_KEY,GEMINI_MODEL=gemini-2.5-flash,GEMINI_FALLBACK_MODELS=gemini-2.0-flash,GEMINI_TTS_MODEL=gemini-2.5-flash-preview-tts
-```
-
-## Submission Documents
-
-Google Doc-ready project description:
-
-- [`docs/project-description.md`](docs/project-description.md)
-
 ## Important Deployment Note
 
 This MVP uses SQLite for a simple hackathon deployment. On Cloud Run, the container filesystem is ephemeral, so data may reset when a container instance is replaced. For a production version, replace SQLite with Cloud SQL or Firestore.

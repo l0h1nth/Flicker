@@ -12,14 +12,6 @@ Students, professionals, and entrepreneurs often miss assignments, meetings, bil
 
 Flicker turns reminders into action.
 
-## Live Demo And Submission Links
-
-Add these before final submission:
-
-- **Deployed application:** `PASTE_GOOGLE_CLOUD_URL_HERE`
-- **GitHub repository:** `PASTE_GITHUB_REPOSITORY_URL_HERE`
-- **Project description Google Doc:** `PASTE_GOOGLE_DOC_URL_HERE`
-
 ## What Flicker Does
 
 Flicker watches a user's task board and helps them move from panic to action:
